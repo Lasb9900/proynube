@@ -1,2 +1,308 @@
-:root{--yellow:#ffc526;--blue:#40b4e5;--green:#047732;--black:#12100c;--bg:#f8fbfd}
-body{margin:0;font-family:Inter,system-ui;background:var(--bg);color:var(--black)} .container{max-width:1000px;margin:0 auto;padding:20px} .card{background:#fff;border-radius:16px;box-shadow:0 8px 25px #0001;padding:16px;margin:12px 0;display:flex;flex-direction:column;gap:8px} button{background:var(--blue);color:white;border:none;border-radius:12px;padding:10px 14px;font-weight:700} h1{color:var(--blue)} b{color:var(--yellow)}
+:root {
+  color: #f8fafc;
+  background: #080914;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(14, 165, 233, 0.28),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at top right,
+      rgba(168, 85, 247, 0.28),
+      transparent 30%
+    ),
+    linear-gradient(135deg, #080914 0%, #111827 45%, #1e1b4b 100%);
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+  font-weight: 800;
+  border-radius: 16px;
+  padding: 13px 18px;
+  transition: 0.18s ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.07);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  outline: none;
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.78);
+}
+
+input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.14);
+}
+
+.arena-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 34px 0;
+}
+
+.arena-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 22px;
+  padding: 32px;
+  border-radius: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.7)),
+    radial-gradient(
+      circle at top right,
+      rgba(56, 189, 248, 0.22),
+      transparent 40%
+    );
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.arena-hero h1 {
+  margin: 8px 0;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.arena-hero p {
+  max-width: 620px;
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 16px;
+}
+
+.arena-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  color: #67e8f9;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.user-pill,
+.room-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(2, 6, 23, 0.52);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.user-pill span,
+.room-badge span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-pill strong,
+.room-badge strong {
+  color: #facc15;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.arena-card {
+  padding: 28px;
+  border-radius: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.76);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.26);
+}
+
+.lobby-card {
+  margin-bottom: 16px;
+}
+
+.auth-card {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.section-header h2 {
+  margin: 4px 0 0;
+  font-size: 26px;
+}
+
+.action-bar {
+  display: flex;
+  gap: 12px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.primary-button {
+  color: #06111f;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  box-shadow: 0 14px 34px rgba(56, 189, 248, 0.25);
+}
+
+.success-button {
+  color: #052e16;
+  background: linear-gradient(135deg, #22c55e, #86efac);
+  box-shadow: 0 14px 34px rgba(34, 197, 94, 0.22);
+}
+
+.danger-button {
+  color: #450a0a;
+  background: linear-gradient(135deg, #fb7185, #fb923c);
+  box-shadow: 0 14px 34px rgba(251, 113, 133, 0.22);
+}
+
+.ghost-button {
+  color: #e0f2fe;
+  background: rgba(14, 165, 233, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.26);
+  box-shadow: none;
+}
+
+.arena-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.question-section {
+  min-height: 330px;
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(49, 46, 129, 0.58)),
+    radial-gradient(
+      circle at bottom right,
+      rgba(236, 72, 153, 0.22),
+      transparent 38%
+    );
+}
+
+.leaderboard-section {
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(20, 83, 45, 0.38)),
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.2), transparent 38%);
+}
+
+.empty-state {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #cbd5e1;
+}
+
+.empty-state span {
+  font-size: 58px;
+}
+
+.empty-state h2 {
+  margin: 10px 0 6px;
+  color: #f8fafc;
+}
+
+.empty-state p {
+  margin: 0;
+  color: #94a3b8;
+}
+
+/* Mejora visual para botones internos de QuestionCard */
+.question-section button {
+  width: 100%;
+  margin: 8px 0;
+  color: #e0f2fe;
+  background: rgba(14, 165, 233, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: none;
+  text-align: left;
+}
+
+.question-section button:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    rgba(14, 165, 233, 0.35),
+    rgba(99, 102, 241, 0.35)
+  );
+}
+
+.leaderboard-section ul,
+.leaderboard-section ol {
+  padding-left: 20px;
+}
+
+@media (max-width: 900px) {
+  .arena-hero,
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .user-pill,
+  .room-badge {
+    width: 100%;
+  }
+
+  .arena-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .arena-shell {
+    width: min(100% - 20px, 1180px);
+    padding: 18px 0;
+  }
+
+  .arena-hero,
+  .arena-card {
+    padding: 20px;
+    border-radius: 24px;
+  }
+
+  .action-bar button {
+    width: 100%;
+  }
+}
