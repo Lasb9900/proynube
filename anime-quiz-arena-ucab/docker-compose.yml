@@ -1,11 +1,81 @@
 version: "3.9"
+
 services:
-  api-gateway: {build: ./gateway, ports: ["50050:50050"], environment: ["USERS_SERVICE_ADDR=users-service:50051","QUESTIONS_SERVICE_ADDR=questions-service:50052","GAME_ROOM_SERVICE_ADDR=game-room-service:50053","SCORE_SERVICE_ADDR=score-service:50054"], depends_on: [users-service,questions-service,game-room-service,score-service]}
-  users-service: {build: ./services/users-service, ports: ["50051:50051"], environment: ["DATABASE_URL=postgres://postgres:postgres@users-db:5432/users_db"], depends_on: [users-db]}
-  questions-service: {build: ./services/questions-service, ports: ["50052:50052"], environment: ["JIKAN_BASE_URL=https://api.jikan.moe/v4"]}
-  game-room-service: {build: ./services/game-room-service, ports: ["50053:50053"], environment: ["DATABASE_URL=postgres://postgres:postgres@rooms-db:5432/rooms_db","SCORE_SERVICE_ADDR=score-service:50054"], depends_on: [rooms-db,score-service]}
-  score-service: {build: ./services/score-service, ports: ["50054:50054"], environment: ["REDIS_URL=redis://redis:6379"], depends_on: [redis]}
-  live-events-service: {build: ./services/live-events-service, ports: ["50055:50055"]}
-  users-db: {image: postgres:16, environment: ["POSTGRES_USER=postgres","POSTGRES_PASSWORD=postgres","POSTGRES_DB=users_db"], ports: ["5433:5432"]}
-  rooms-db: {image: postgres:16, environment: ["POSTGRES_USER=postgres","POSTGRES_PASSWORD=postgres","POSTGRES_DB=rooms_db"], ports: ["5434:5432"]}
-  redis: {image: redis:7-alpine, ports:["6379:6379"]}
+  api-gateway:
+    build: ./gateway
+    ports:
+      - "50050:50050"
+    environment:
+      - USERS_SERVICE_ADDR=users-service:50051
+      - QUESTIONS_SERVICE_ADDR=questions-service:50052
+      - GAME_ROOM_SERVICE_ADDR=game-room-service:50053
+      - SCORE_SERVICE_ADDR=score-service:50054
+    depends_on:
+      - users-service
+      - questions-service
+      - game-room-service
+      - score-service
+
+  users-service:
+    build: ./services/users-service
+    ports:
+      - "50051:50051"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@users-db:5432/users_db
+    depends_on:
+      - users-db
+
+  questions-service:
+    build: ./services/questions-service
+    ports:
+      - "50052:50052"
+    environment:
+      - JIKAN_BASE_URL=https://api.jikan.moe/v4
+
+  game-room-service:
+    build: ./services/game-room-service
+    ports:
+      - "50053:50053"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@rooms-db:5432/rooms_db
+      - SCORE_SERVICE_ADDR=score-service:50054
+    depends_on:
+      - rooms-db
+      - score-service
+
+  score-service:
+    build: ./services/score-service
+    ports:
+      - "50054:50054"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  live-events-service:
+    build: ./services/live-events-service
+    ports:
+      - "50055:50055"
+
+  users-db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=users_db
+    ports:
+      - "5433:5432"
+
+  rooms-db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=rooms_db
+    ports:
+      - "5434:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
