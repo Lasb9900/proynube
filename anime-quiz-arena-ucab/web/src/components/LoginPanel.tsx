@@ -1,0 +1,4 @@
+import { useState } from 'react'; import { toast } from 'sonner'; import * as api from '../api';
+export function LoginPanel({onUser}:{onUser:(u:any)=>void}){const [isRegister,set]=useState(true);const [f,setF]=useState({username:'',email:'',password:''});
+const submit=async()=>{try{const r=isRegister?await api.createUser(f.username,f.email,f.password):await api.login(f.email,f.password); onUser(r.user); toast.success('Sesión iniciada');}catch(e:any){toast.error(e.message)}};
+return <div className='card'><h2>{isRegister?'Crear usuario':'Login'}</h2><input placeholder='username' onChange={e=>setF({...f,username:e.target.value})}/><input placeholder='email' onChange={e=>setF({...f,email:e.target.value})}/><input placeholder='password' type='password' onChange={e=>setF({...f,password:e.target.value})}/><button onClick={submit}>{isRegister?'Crear usuario':'Login'}</button><button onClick={()=>set(!isRegister)}>Cambiar</button></div>}

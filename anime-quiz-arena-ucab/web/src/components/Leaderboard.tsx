@@ -1,0 +1,2 @@
+import type { ScoreEntry } from '../types';
+export function Leaderboard({entries,onRefresh}:{entries:ScoreEntry[],onRefresh:()=>void}){return <div className='card'><h3>Leaderboard</h3><button onClick={onRefresh}>Refresh</button><table><tbody>{entries.map(e=><tr key={e.user_id}><td>#{e.rank}</td><td>{e.user_id}</td><td>{e.points}</td></tr>)}</tbody></table><small>Actualizando ranking en vivo...</small></div>}
