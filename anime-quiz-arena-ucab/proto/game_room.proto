@@ -1,0 +1,9 @@
+syntax="proto3"; package animequiz.gameroom.v1;
+message Room{string id=1; string name=2; string status=3; string created_by=4; string created_at=5;}
+message CreateRoomRequest{string name=1; string created_by=2;} message CreateRoomResponse{Room room=1;}
+message JoinRoomRequest{string room_id=1; string user_id=2;} message JoinRoomResponse{bool success=1; string message=2;}
+message StartGameRequest{string room_id=1;} message StartGameResponse{bool success=1; string status=2;}
+message EndGameRequest{string room_id=1;} message EndGameResponse{bool success=1; string status=2;}
+message SubmitAnswerRequest{string room_id=1; string user_id=2; string question_id=3; string selected_option=4; string correct_option=5;}
+message SubmitAnswerResponse{bool correct=1; int32 points_awarded=2; string message=3;}
+service GameRoomService{rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse); rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse); rpc StartGame(StartGameRequest) returns (StartGameResponse); rpc EndGame(EndGameRequest) returns (EndGameResponse); rpc SubmitAnswer(SubmitAnswerRequest) returns (SubmitAnswerResponse);}

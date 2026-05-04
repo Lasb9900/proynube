@@ -1,0 +1,11 @@
+syntax="proto3"; package animequiz.gateway.v1;
+import "users.proto"; import "questions.proto"; import "game_room.proto"; import "score.proto";
+service GatewayService{
+  rpc CreateUser(animequiz.users.v1.CreateUserRequest) returns (animequiz.users.v1.CreateUserResponse);
+  rpc SearchAnime(animequiz.questions.v1.SearchAnimeRequest) returns (animequiz.questions.v1.SearchAnimeResponse);
+  rpc GenerateQuestion(animequiz.questions.v1.GenerateQuestionRequest) returns (animequiz.questions.v1.GenerateQuestionResponse);
+  rpc CreateRoom(animequiz.gameroom.v1.CreateRoomRequest) returns (animequiz.gameroom.v1.CreateRoomResponse);
+  rpc JoinRoom(animequiz.gameroom.v1.JoinRoomRequest) returns (animequiz.gameroom.v1.JoinRoomResponse);
+  rpc SubmitAnswer(animequiz.gameroom.v1.SubmitAnswerRequest) returns (animequiz.gameroom.v1.SubmitAnswerResponse);
+  rpc GetLeaderboard(animequiz.score.v1.GetLeaderboardRequest) returns (animequiz.score.v1.GetLeaderboardResponse);
+}
