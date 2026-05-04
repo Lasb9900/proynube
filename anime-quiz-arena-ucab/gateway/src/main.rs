@@ -985,8 +985,11 @@ async fn main() -> anyhow::Result<()> {
         score_addr,
     };
 
-    let grpc_addr: SocketAddr = "0.0.0.0:50050".parse()?;
-    let http_addr: SocketAddr = "0.0.0.0:8080".parse()?;
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50050".to_string());
+    let http_port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
+    let http_addr: SocketAddr = format!("0.0.0.0:{http_port}").parse()?;
 
     let app = Router::new()
         .route("/health", get(health))

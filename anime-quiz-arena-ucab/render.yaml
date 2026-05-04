@@ -1,0 +1,96 @@
+services:
+  - type: web
+    name: api-gateway
+    runtime: docker
+    dockerfilePath: gateway/Dockerfile
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: GRPC_PORT
+        value: "50050"
+      - key: USERS_SERVICE_ADDR
+        value: users-service:50051
+      - key: QUESTIONS_SERVICE_ADDR
+        value: questions-service:50052
+      - key: GAME_ROOM_SERVICE_ADDR
+        value: game-room-service:50053
+      - key: SCORE_SERVICE_ADDR
+        value: score-service:50054
+
+  - type: pserv
+    name: users-service
+    runtime: docker
+    dockerfilePath: services/users-service/Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: users-db
+          property: connectionString
+
+  - type: pserv
+    name: questions-service
+    runtime: docker
+    dockerfilePath: services/questions-service/Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: JIKAN_BASE_URL
+        value: https://api.jikan.moe/v4
+
+  - type: pserv
+    name: game-room-service
+    runtime: docker
+    dockerfilePath: services/game-room-service/Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rooms-db
+          property: connectionString
+      - key: SCORE_SERVICE_ADDR
+        value: score-service:50054
+
+  - type: pserv
+    name: score-service
+    runtime: docker
+    dockerfilePath: services/score-service/Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: score-redis
+          property: connectionString
+
+  - type: static_site
+    name: web
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://api-gateway.onrender.com
+
+databases:
+  - name: users-db
+    plan: free
+    databaseName: users_db
+    user: users_db_user
+
+  - name: rooms-db
+    plan: free
+    databaseName: rooms_db
+    user: rooms_db_user
+
+  - name: score-redis
+    type: keyvalue
+    plan: free
+    ipAllowList: []
