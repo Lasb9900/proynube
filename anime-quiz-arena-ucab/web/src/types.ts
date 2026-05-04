@@ -29,3 +29,19 @@ export type ScoreEntry = {
   points: number;
   rank: number;
 };
+
+
+export type RoomPlayer = {
+  userId: string;
+  answeredCurrentQuestion: boolean;
+  ready: boolean;
+  joinedAt: string;
+};
+
+export type RoomState = {
+  room: Room | null;
+  players: RoomPlayer[];
+  totalPlayers: number;
+  answeredCount: number;
+  allAnswered: boolean;
+};

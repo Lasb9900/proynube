@@ -14,6 +14,7 @@ service GatewayService {
   rpc EndGame(GatewayRoomIdRequest) returns (GatewayRoomResponse);
 
   rpc SubmitAnswer(GatewaySubmitAnswerRequest) returns (GatewaySubmitAnswerResponse);
+  rpc GetRoomState(GatewayRoomStateRequest) returns (GatewayRoomStateResponse);
 
   rpc GetLeaderboard(GatewayLeaderboardRequest) returns (GatewayLeaderboardResponse);
 }
@@ -82,6 +83,26 @@ message GatewaySubmitAnswerResponse {
   int32 points_awarded = 2;
   int32 total_points = 3;
   string message = 4;
+}
+
+message GatewayRoomStateRequest {
+  string room_id = 1;
+  string current_question_id = 2;
+}
+
+message GatewayRoomPlayer {
+  string user_id = 1;
+  bool answered_current_question = 2;
+  bool ready = 3;
+  string joined_at = 4;
+}
+
+message GatewayRoomStateResponse {
+  GatewayRoom room = 1;
+  repeated GatewayRoomPlayer players = 2;
+  int32 total_players = 3;
+  int32 answered_count = 4;
+  bool all_answered = 5;
 }
 
 message GatewayScoreEntry { string user_id = 1; int32 points = 2; int32 rank = 3; }

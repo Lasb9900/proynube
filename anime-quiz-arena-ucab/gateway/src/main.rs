@@ -202,6 +202,28 @@ struct SearchQuery {
 struct LeaderboardQuery {
     limit: Option<i32>,
 }
+#[derive(Debug, Deserialize)]
+struct RoomStateQuery {
+    question_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoomPlayerDto {
+    user_id: String,
+    answered_current_question: bool,
+    ready: bool,
+    joined_at: String,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoomStateResponseDto {
+    room: Option<RoomDto>,
+    players: Vec<RoomPlayerDto>,
+    total_players: i32,
+    answered_count: i32,
+    all_answered: bool,
+}
 
 impl From<users::User> for UserDto {
     fn from(user: users::User) -> Self {
@@ -585,6 +607,38 @@ impl GatewayService for GatewayServerImpl {
                 .collect(),
         }))
     }
+
+    async fn get_room_state(
+        &self,
+        request: Request<GatewayRoomStateRequest>,
+    ) -> Result<Response<GatewayRoomStateResponse>, Status> {
+        let p = request.into_inner();
+        let mut c = self.game_room_client().await?;
+        let r = c
+            .get_room_state(gameroom::GetRoomStateRequest {
+                room_id: p.room_id,
+                current_question_id: p.current_question_id,
+            })
+            .await
+            .map_err(|e| Status::new(e.code(), e.message().to_string()))?
+            .into_inner();
+        Ok(Response::new(GatewayRoomStateResponse {
+            room: r.room.map(map_room),
+            players: r
+                .players
+                .into_iter()
+                .map(|p| GatewayRoomPlayer {
+                    user_id: p.user_id,
+                    answered_current_question: p.answered_current_question,
+                    ready: p.ready,
+                    joined_at: p.joined_at,
+                })
+                .collect(),
+            total_players: r.total_players,
+            answered_count: r.answered_count,
+            all_answered: r.all_answered,
+        }))
+    }
 }
 
 fn map_room(room: gameroom::Room) -> GatewayRoom {
@@ -829,7 +883,11 @@ async fn leaderboard_http(
         .into_inner();
 
     Ok(Json(LeaderboardResponseDto {
-        entries: response.entries.into_iter().map(ScoreEntryDto::from).collect(),
+        entries: response
+            .entries
+            .into_iter()
+            .map(ScoreEntryDto::from)
+            .collect(),
     }))
 }
 
@@ -852,6 +910,43 @@ async fn end_game_http(
 
     Ok(Json(RoomResponseDto {
         room: response.room.map(RoomDto::from),
+    }))
+}
+
+async fn room_state_http(
+    Path(room_id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<RoomStateQuery>,
+) -> ApiResult<RoomStateResponseDto> {
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
+        "http://{}",
+        state.game_room_addr
+    ))
+    .await
+    .map_err(map_connect_error)?;
+    let response = client
+        .get_room_state(gameroom::GetRoomStateRequest {
+            room_id,
+            current_question_id: query.question_id.unwrap_or_default(),
+        })
+        .await
+        .map_err(map_grpc_error)?
+        .into_inner();
+    Ok(Json(RoomStateResponseDto {
+        room: response.room.map(RoomDto::from),
+        players: response
+            .players
+            .into_iter()
+            .map(|p| RoomPlayerDto {
+                user_id: p.user_id,
+                answered_current_question: p.answered_current_question,
+                ready: p.ready,
+                joined_at: p.joined_at,
+            })
+            .collect(),
+        total_players: response.total_players,
+        answered_count: response.answered_count,
+        all_answered: response.all_answered,
     }))
 }
 
@@ -898,6 +993,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/rooms/:room_id/start", post(start_game_http))
         .route("/api/rooms/:room_id/answer", post(submit_answer_http))
         .route("/api/rooms/:room_id/leaderboard", get(leaderboard_http))
+        .route("/api/rooms/:room_id/state", get(room_state_http))
         .route("/api/rooms/:room_id/end", post(end_game_http))
         .layer(CorsLayer::permissive())
         .with_state(app_state);

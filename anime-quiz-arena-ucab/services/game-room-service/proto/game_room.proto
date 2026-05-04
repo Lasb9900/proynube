@@ -58,10 +58,31 @@ message SubmitAnswerResponse {
   string message = 4;
 }
 
+message GetRoomStateRequest {
+  string room_id = 1;
+  string current_question_id = 2;
+}
+
+message RoomPlayer {
+  string user_id = 1;
+  bool answered_current_question = 2;
+  bool ready = 3;
+  string joined_at = 4;
+}
+
+message GetRoomStateResponse {
+  Room room = 1;
+  repeated RoomPlayer players = 2;
+  int32 total_players = 3;
+  int32 answered_count = 4;
+  bool all_answered = 5;
+}
+
 service GameRoomService {
   rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
   rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
   rpc StartGame(StartGameRequest) returns (StartGameResponse);
   rpc EndGame(EndGameRequest) returns (EndGameResponse);
   rpc SubmitAnswer(SubmitAnswerRequest) returns (SubmitAnswerResponse);
+  rpc GetRoomState(GetRoomStateRequest) returns (GetRoomStateResponse);
 }
