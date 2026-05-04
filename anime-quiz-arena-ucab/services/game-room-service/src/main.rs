@@ -1,4 +1,5 @@
 use chrono::{NaiveDateTime, Utc};
+use sqlx::Error as SqlxError;
 use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
 use std::env;
 use tonic::{transport::Server, Request, Response, Status};
@@ -31,6 +32,13 @@ struct RoomRow {
     status: String,
     created_by: Uuid,
     created_at: NaiveDateTime,
+}
+
+#[derive(FromRow)]
+struct RoomPlayerRow {
+    user_id: Uuid,
+    ready: bool,
+    joined_at: NaiveDateTime,
 }
 
 impl GameRoomSvc {
@@ -122,7 +130,7 @@ impl GameRoomService for GameRoomSvc {
         }
 
         sqlx::query(
-            "INSERT INTO room_players (room_id, user_id, joined_at) VALUES ($1, $2, $3) ON CONFLICT (room_id, user_id) DO NOTHING",
+            "INSERT INTO room_players (room_id, user_id, joined_at, ready) VALUES ($1, $2, $3, true) ON CONFLICT (room_id, user_id) DO NOTHING",
         )
         .bind(room_id)
         .bind(user_id)
@@ -189,6 +197,7 @@ impl GameRoomService for GameRoomSvc {
         let user_id = Self::parse_uuid(&payload.user_id, "user_id")?;
         Self::ensure_non_empty(&payload.selected_option, "selected_option")?;
         Self::ensure_non_empty(&payload.correct_option, "correct_option")?;
+        Self::ensure_non_empty(&payload.question_id, "question_id")?;
 
         let room = self.get_room(room_id).await?;
         if room.status != "STARTED" {
@@ -196,23 +205,44 @@ impl GameRoomService for GameRoomSvc {
         }
 
         let joined: bool = sqlx::query_scalar(
-    "SELECT EXISTS(
+            "SELECT EXISTS(
         SELECT 1
         FROM room_players
         WHERE room_id = $1 AND user_id = $2
     )",
-)
-                    .bind(room_id)
-                    .bind(user_id)
-                    .fetch_one(&self.db)
-                    .await
-                    .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
+        )
+        .bind(room_id)
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
 
-                            if !joined {
-                             return Err(Status::failed_precondition("user is not in the room"));
-}
+        if !joined {
+            return Err(Status::failed_precondition("user is not in the room"));
+        }
 
         let is_correct = payload.selected_option.trim() == payload.correct_option.trim();
+
+        let inserted = sqlx::query("INSERT INTO room_answers (room_id, question_id, user_id, selected_option, correct_option, is_correct) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(room_id)
+            .bind(payload.question_id.trim())
+            .bind(user_id)
+            .bind(payload.selected_option.trim())
+            .bind(payload.correct_option.trim())
+            .bind(is_correct)
+            .execute(&self.db)
+            .await;
+
+        if let Err(e) = inserted {
+            if let SqlxError::Database(db_err) = &e {
+                if db_err.is_unique_violation() {
+                    return Err(Status::failed_precondition(
+                        "user already answered this question",
+                    ));
+                }
+            }
+            return Err(Status::unavailable(format!("database error: {e}")));
+        }
         info!(room_id = %room_id, user_id = %user_id, question_id = %payload.question_id, correct = is_correct, "Answer submitted");
 
         if !is_correct {
@@ -271,6 +301,69 @@ impl GameRoomService for GameRoomSvc {
             }
         }
     }
+
+    async fn get_room_state(
+        &self,
+        request: Request<GetRoomStateRequest>,
+    ) -> Result<Response<GetRoomStateResponse>, Status> {
+        let payload = request.into_inner();
+        let room_id = Self::parse_uuid(&payload.room_id, "room_id")?;
+        let room = self.get_room(room_id).await?;
+        let current_q = payload.current_question_id.trim().to_string();
+        let has_question = !current_q.is_empty();
+
+        let player_rows = sqlx::query_as::<_, RoomPlayerRow>(
+            "SELECT user_id, ready, joined_at FROM room_players WHERE room_id = $1 ORDER BY joined_at ASC",
+        )
+        .bind(room_id)
+        .fetch_all(&self.db)
+        .await
+        .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
+
+        let total_players = player_rows.len() as i32;
+        let answered_count = if has_question {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM room_answers WHERE room_id = $1 AND question_id = $2",
+            )
+            .bind(room_id)
+            .bind(&current_q)
+            .fetch_one(&self.db)
+            .await
+            .map_err(|e| Status::unavailable(format!("database error: {e}")))? as i32
+        } else {
+            0
+        };
+
+        let mut players = Vec::with_capacity(player_rows.len());
+        for player in player_rows {
+            let answered_current_question = if has_question {
+                sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM room_answers WHERE room_id = $1 AND question_id = $2 AND user_id = $3)")
+                    .bind(room_id)
+                    .bind(&current_q)
+                    .bind(player.user_id)
+                    .fetch_one(&self.db)
+                    .await
+                    .map_err(|e| Status::unavailable(format!("database error: {e}")))?
+            } else {
+                false
+            };
+            players.push(RoomPlayer {
+                user_id: player.user_id.to_string(),
+                answered_current_question,
+                ready: player.ready,
+                joined_at: player.joined_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+            });
+        }
+
+        let all_answered = has_question && total_players > 0 && answered_count == total_players;
+        Ok(Response::new(GetRoomStateResponse {
+            room: Some(Self::to_proto_room(room)),
+            players,
+            total_players,
+            answered_count,
+            all_answered,
+        }))
+    }
 }
 
 #[tokio::main]
@@ -306,12 +399,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "CREATE TABLE IF NOT EXISTS room_players (
             room_id UUID NOT NULL,
             user_id UUID NOT NULL,
-            joined_at TIMESTAMP NOT NULL,
+            joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            ready BOOLEAN NOT NULL DEFAULT true,
             PRIMARY KEY (room_id, user_id)
         )",
     )
     .execute(&db)
     .await?;
+    sqlx::query("ALTER TABLE room_players ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+        .execute(&db)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE room_players ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT true",
+    )
+    .execute(&db)
+    .await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS room_answers (room_id UUID NOT NULL, question_id TEXT NOT NULL, user_id UUID NOT NULL, selected_option TEXT NOT NULL, correct_option TEXT NOT NULL, is_correct BOOLEAN NOT NULL, answered_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (room_id, question_id, user_id))")
+        .execute(&db)
+        .await?;
     info!("Game room tables ready");
 
     let addr = "0.0.0.0:50053".parse()?;

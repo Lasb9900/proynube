@@ -1,4 +1,5 @@
 use rand::seq::SliceRandom;
+use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -240,16 +241,16 @@ impl QuestionsService for QuestionsSvc {
                     .first()
                     .ok_or_else(|| Status::internal("No anime available for question"))?;
 
-                let question = Question {
+                let question = build_varied_question(options).unwrap_or_else(|| Question {
                     id: Uuid::new_v4().to_string(),
-                    text: "¿Cuál de estos animes tiene el título correcto?".to_string(),
+                    text: "Cual de estos animes tiene el titulo correcto?".to_string(),
                     option_a: options[0].title.clone(),
                     option_b: options[1].title.clone(),
                     option_c: options[2].title.clone(),
                     option_d: options[3].title.clone(),
                     correct_option: "A".to_string(),
                     anime_id: correct.id,
-                };
+                });
 
                 Ok(Response::new(GenerateQuestionResponse {
                     question: Some(question),
@@ -289,13 +290,119 @@ fn map_jikan_anime(a: JikanAnime) -> Anime {
 fn fallback_question() -> Question {
     Question {
         id: format!("fallback-{}", Uuid::new_v4()),
-        text: "¿Quién es el protagonista de Naruto?".to_string(),
+        text: "Cual de estos animes tiene el titulo correcto?".to_string(),
         option_a: "Ichigo Kurosaki".to_string(),
         option_b: "Naruto Uzumaki".to_string(),
         option_c: "Monkey D. Luffy".to_string(),
         option_d: "Eren Yeager".to_string(),
         correct_option: "B".to_string(),
         anime_id: 20,
+    }
+}
+
+fn build_varied_question(options: &[Anime]) -> Option<Question> {
+    if options.len() < 4 {
+        return None;
+    }
+    let labels = ["A", "B", "C", "D"];
+    let mut rng = rand::thread_rng();
+    let t = rng.gen_range(0..5);
+    match t {
+        1 => {
+            let best = options.iter().enumerate().max_by(|a, b| {
+                a.1.score
+                    .partial_cmp(&b.1.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })?;
+            Some(Question {
+                id: Uuid::new_v4().to_string(),
+                text: "Cual de estos animes tiene mejor puntuacion?".to_string(),
+                option_a: options[0].title.clone(),
+                option_b: options[1].title.clone(),
+                option_c: options[2].title.clone(),
+                option_d: options[3].title.clone(),
+                correct_option: labels[best.0].to_string(),
+                anime_id: best.1.id,
+            })
+        }
+        2 => {
+            let best = options.iter().enumerate().max_by_key(|(_, a)| a.episodes)?;
+            Some(Question {
+                id: Uuid::new_v4().to_string(),
+                text: "Cual de estos animes tiene mas episodios?".to_string(),
+                option_a: options[0].title.clone(),
+                option_b: options[1].title.clone(),
+                option_c: options[2].title.clone(),
+                option_d: options[3].title.clone(),
+                correct_option: labels[best.0].to_string(),
+                anime_id: best.1.id,
+            })
+        }
+        3 => {
+            let target = &options[0];
+            let mut vals = vec![
+                target.episodes.to_string(),
+                options[1].episodes.to_string(),
+                options[2].episodes.to_string(),
+                options[3].episodes.to_string(),
+            ];
+            vals.sort();
+            vals.dedup();
+            if vals.len() < 4 {
+                return None;
+            }
+            vals.shuffle(&mut rng);
+            let correct_idx = vals
+                .iter()
+                .position(|v| v == &target.episodes.to_string())?;
+            Some(Question {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Cuantos episodios tiene {}?", target.title),
+                option_a: vals[0].clone(),
+                option_b: vals[1].clone(),
+                option_c: vals[2].clone(),
+                option_d: vals[3].clone(),
+                correct_option: labels[correct_idx].to_string(),
+                anime_id: target.id,
+            })
+        }
+        4 => {
+            let target = &options[0];
+            let mut vals = vec![
+                format!("{:.1}", target.score),
+                format!("{:.1}", options[1].score),
+                format!("{:.1}", options[2].score),
+                format!("{:.1}", options[3].score),
+            ];
+            vals.sort();
+            vals.dedup();
+            if vals.len() < 4 {
+                return None;
+            }
+            vals.shuffle(&mut rng);
+            let c = format!("{:.1}", target.score);
+            let correct_idx = vals.iter().position(|v| v == &c)?;
+            Some(Question {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Cual es la puntuacion aproximada de {}?", target.title),
+                option_a: vals[0].clone(),
+                option_b: vals[1].clone(),
+                option_c: vals[2].clone(),
+                option_d: vals[3].clone(),
+                correct_option: labels[correct_idx].to_string(),
+                anime_id: target.id,
+            })
+        }
+        _ => Some(Question {
+            id: Uuid::new_v4().to_string(),
+            text: "Cual de estos animes tiene el titulo correcto?".to_string(),
+            option_a: options[0].title.clone(),
+            option_b: options[1].title.clone(),
+            option_c: options[2].title.clone(),
+            option_d: options[3].title.clone(),
+            correct_option: "A".to_string(),
+            anime_id: options[0].id,
+        }),
     }
 }
 
