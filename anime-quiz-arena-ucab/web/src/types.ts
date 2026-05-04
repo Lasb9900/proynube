@@ -33,6 +33,7 @@ export type ScoreEntry = {
 
 export type RoomPlayer = {
   userId: string;
+  username: string;
   answeredCurrentQuestion: boolean;
   ready: boolean;
   joinedAt: string;

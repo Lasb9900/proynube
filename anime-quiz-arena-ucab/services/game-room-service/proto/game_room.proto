@@ -21,6 +21,7 @@ message CreateRoomResponse {
 message JoinRoomRequest {
   string room_id = 1;
   string user_id = 2;
+  string username = 3;
 }
 
 message JoinRoomResponse {
@@ -65,9 +66,10 @@ message GetRoomStateRequest {
 
 message RoomPlayer {
   string user_id = 1;
-  bool answered_current_question = 2;
-  bool ready = 3;
-  string joined_at = 4;
+  string username = 2;
+  bool answered_current_question = 3;
+  bool ready = 4;
+  string joined_at = 5;
 }
 
 message GetRoomStateResponse {

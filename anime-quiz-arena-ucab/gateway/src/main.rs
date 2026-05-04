@@ -183,6 +183,7 @@ struct CreateRoomBody {
 #[derive(Debug, Deserialize)]
 struct JoinBody {
     user_id: String,
+    username: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +212,7 @@ struct RoomStateQuery {
 #[serde(rename_all = "camelCase")]
 struct RoomPlayerDto {
     user_id: String,
+    username: String,
     answered_current_question: bool,
     ready: bool,
     joined_at: String,
@@ -510,6 +512,7 @@ impl GatewayService for GatewayServerImpl {
             .join_room(gameroom::JoinRoomRequest {
                 room_id: p.room_id,
                 user_id: p.user_id,
+                username: p.username,
             })
             .await
             .map_err(|e| Status::new(e.code(), e.message().to_string()))?
@@ -629,6 +632,7 @@ impl GatewayService for GatewayServerImpl {
                 .into_iter()
                 .map(|p| GatewayRoomPlayer {
                     user_id: p.user_id,
+                    username: p.username,
                     answered_current_question: p.answered_current_question,
                     ready: p.ready,
                     joined_at: p.joined_at,
@@ -797,6 +801,7 @@ async fn join_room_http(
         .join_room(gameroom::JoinRoomRequest {
             room_id,
             user_id: body.user_id,
+            username: body.username.unwrap_or_default(),
         })
         .await
         .map_err(map_grpc_error)?
@@ -939,6 +944,7 @@ async fn room_state_http(
             .into_iter()
             .map(|p| RoomPlayerDto {
                 user_id: p.user_id,
+                username: p.username,
                 answered_current_question: p.answered_current_question,
                 ready: p.ready,
                 joined_at: p.joined_at,
