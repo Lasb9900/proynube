@@ -69,12 +69,22 @@ services:
           name: score-redis
           property: connectionString
 
-  - type: static_site
+  - type: keyvalue
+    name: score-redis
+    plan: free
+    ipAllowList: []
+
+  - type: web
     name: web
+    runtime: static
     rootDir: web
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     pullRequestPreviewsEnabled: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
         value: https://api-gateway.onrender.com
@@ -89,8 +99,3 @@ databases:
     plan: free
     databaseName: rooms_db
     user: rooms_db_user
-
-  - name: score-redis
-    type: keyvalue
-    plan: free
-    ipAllowList: []
