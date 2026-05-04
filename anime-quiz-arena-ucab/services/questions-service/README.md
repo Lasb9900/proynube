@@ -9,6 +9,23 @@ Servicio gRPC en Rust (`tonic` + `tokio`) que adapta la API REST de Jikan a cont
 - `HTTP_TIMEOUT_SECS` (default: `5`)
 - `CB_COOLDOWN_SECS` (default: `30`)
 
+## Generacion de preguntas para demo
+
+`GenerateQuestion` ahora combina dos fuentes:
+
+- **Banco curado interno** (aprox. 60%): preguntas reconocibles y variadas de series populares.
+- **Plantillas dinamicas con Jikan** (aprox. 40%): preguntas generadas con datos en tiempo real.
+
+Si falla Jikan (timeout, circuito abierto, etc.), el servicio hace fallback a preguntas curadas.
+Si en algun caso el banco curado no estuviera disponible, mantiene fallback local para estabilidad.
+
+El banco curado:
+
+- No usa imagenes ni assets.
+- Mantiene 4 opciones por pregunta.
+- Mezcla opciones en cada generacion para que la correcta no quede fija.
+- Esta orientado a demo (preguntas faciles/medias, series populares).
+
 ## Ejecutar local
 
 ```bash
@@ -48,25 +65,11 @@ grpcurl -plaintext -d '{"room_id":"demo-room"}' localhost:50052 animequiz.questi
 
 ## External API Adapter
 
-Este servicio implementa el patrón **External API Adapter** porque expone gRPC estable hacia adentro del sistema, mientras consume REST/JSON de Jikan (`/anime`, `/anime/{id}`, `/top/anime`) hacia afuera. Así, los demás microservicios nunca dependen directamente del formato externo.
+Este servicio implementa el patron **External API Adapter** porque expone gRPC estable hacia adentro del sistema, mientras consume REST/JSON de Jikan (`/anime`, `/anime/{id}`, `/top/anime`) hacia afuera. Asi, los demas microservicios nunca dependen directamente del formato externo.
 
-## Circuit Breaker básico
+## Circuit Breaker basico
 
 - Se registran fallos consecutivos al llamar Jikan.
 - Al llegar a **3 fallos seguidos**, el circuito se abre por `CB_COOLDOWN_SECS`.
-- Mientras está abierto, `GenerateQuestion` responde con fallback local sin invocar Jikan.
+- Mientras esta abierto, `GenerateQuestion` responde usando fallback interno sin invocar Jikan.
 - Al vencer el cooldown, se permite intentar de nuevo (half-open simplificado).
-
-## Fallback obligatorio en GenerateQuestion
-
-Pregunta:
-- `¿Quién es el protagonista de Naruto?`
-
-Opciones:
-- A) Ichigo Kurosaki
-- B) Naruto Uzumaki
-- C) Monkey D. Luffy
-- D) Eren Yeager
-
-Correcta:
-- `B`
