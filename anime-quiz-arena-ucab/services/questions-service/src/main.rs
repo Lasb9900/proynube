@@ -2,6 +2,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -22,6 +23,7 @@ use questions::{
 #[derive(Clone)]
 struct QuestionsSvc {
     adapter: Arc<JikanAdapter>,
+    recent_curated_by_room: Arc<Mutex<HashMap<String, VecDeque<usize>>>>,
 }
 
 #[derive(Debug)]
@@ -197,6 +199,528 @@ impl JikanAdapter {
     }
 }
 
+struct CuratedQuestion {
+    text: &'static str,
+    options: [&'static str; 4],
+    correct_index: usize,
+    anime_id: i32,
+}
+
+const ANSWER_LABELS: [&str; 4] = ["A", "B", "C", "D"];
+
+const CURATED_QUESTIONS: [CuratedQuestion; 60] = [
+    CuratedQuestion {
+        text: "Quien es el protagonista principal de Dragon Ball?",
+        options: ["Goku", "Vegeta", "Naruto", "Ichigo"],
+        correct_index: 0,
+        anime_id: 223,
+    },
+    CuratedQuestion {
+        text: "Cual transformacion es famosa en Dragon Ball Z?",
+        options: ["Super Saiyan", "Bankai", "Gear Second", "Sharingan"],
+        correct_index: 0,
+        anime_id: 813,
+    },
+    CuratedQuestion {
+        text: "Como se llama el radar para buscar esferas en Dragon Ball?",
+        options: ["Dragon Radar", "Den Den Mushi", "Death Note", "Poke Radar"],
+        correct_index: 0,
+        anime_id: 223,
+    },
+    CuratedQuestion {
+        text: "Quien es el principe de los Saiyajin en Dragon Ball Z?",
+        options: ["Gohan", "Vegeta", "Piccolo", "Trunks"],
+        correct_index: 1,
+        anime_id: 813,
+    },
+    CuratedQuestion {
+        text: "En que aldea vive Naruto al inicio de la serie?",
+        options: [
+            "Aldea Oculta de la Hoja",
+            "Aldea Oculta de la Arena",
+            "Aldea Oculta de la Niebla",
+            "Aldea Oculta de la Roca",
+        ],
+        correct_index: 0,
+        anime_id: 20,
+    },
+    CuratedQuestion {
+        text: "Que tecnica visual pertenece al clan Uchiha?",
+        options: ["Sharingan", "Bankai", "Haki", "Rasengan"],
+        correct_index: 0,
+        anime_id: 20,
+    },
+    CuratedQuestion {
+        text: "Que grupo de villanos aparece en Naruto Shippuden?",
+        options: ["Akatsuki", "Espada", "Cipher Pol", "Homunculos"],
+        correct_index: 0,
+        anime_id: 1735,
+    },
+    CuratedQuestion {
+        text: "Cual es el sueno de Naruto?",
+        options: [
+            "Ser Hokage",
+            "Ser Rey Pirata",
+            "Ser capitan",
+            "Encontrar al padre",
+        ],
+        correct_index: 0,
+        anime_id: 20,
+    },
+    CuratedQuestion {
+        text: "Cual es el objetivo principal de Luffy?",
+        options: [
+            "Convertirse en Rey de los Piratas",
+            "Ser Hokage",
+            "Encontrar las Esferas del Dragon",
+            "Ser Shinigami",
+        ],
+        correct_index: 0,
+        anime_id: 21,
+    },
+    CuratedQuestion {
+        text: "Como se llama la tripulacion de Luffy?",
+        options: [
+            "Sombrero de Paja",
+            "Akatsuki",
+            "Tropa de Reconocimiento",
+            "Espada",
+        ],
+        correct_index: 0,
+        anime_id: 21,
+    },
+    CuratedQuestion {
+        text: "Que fruta comio Luffy?",
+        options: [
+            "Gomu Gomu no Mi",
+            "Mera Mera no Mi",
+            "Ope Ope no Mi",
+            "Suna Suna no Mi",
+        ],
+        correct_index: 0,
+        anime_id: 21,
+    },
+    CuratedQuestion {
+        text: "Quien es el espadachin principal de los Sombrero de Paja?",
+        options: ["Sanji", "Zoro", "Usopp", "Franky"],
+        correct_index: 1,
+        anime_id: 21,
+    },
+    CuratedQuestion {
+        text: "Que arma espiritual usan los Shinigami en Bleach?",
+        options: ["Zanpakuto", "Kunai", "Death Note", "Pokeball"],
+        correct_index: 0,
+        anime_id: 269,
+    },
+    CuratedQuestion {
+        text: "Como se llama la liberacion final de una Zanpakuto?",
+        options: ["Bankai", "Domain Expansion", "Gear Fifth", "Nen"],
+        correct_index: 0,
+        anime_id: 269,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de Bleach?",
+        options: [
+            "Ichigo Kurosaki",
+            "Uryu Ishida",
+            "Sosuke Aizen",
+            "Yusuke Urameshi",
+        ],
+        correct_index: 0,
+        anime_id: 269,
+    },
+    CuratedQuestion {
+        text: "Que organizacion protege almas en Bleach?",
+        options: ["Soul Society", "Akatsuki", "Survey Corps", "Magic Council"],
+        correct_index: 0,
+        anime_id: 269,
+    },
+    CuratedQuestion {
+        text: "Que objeto usa Light Yagami?",
+        options: ["Death Note", "Dragon Radar", "Kunai", "Zanpakuto"],
+        correct_index: 0,
+        anime_id: 1535,
+    },
+    CuratedQuestion {
+        text: "Como se llama el detective rival de Light?",
+        options: ["L", "Near", "Mello", "Aizawa"],
+        correct_index: 0,
+        anime_id: 1535,
+    },
+    CuratedQuestion {
+        text: "Quien es el shinigami que encuentra Light?",
+        options: ["Ryuk", "Rem", "Gelus", "Sidoh"],
+        correct_index: 0,
+        anime_id: 1535,
+    },
+    CuratedQuestion {
+        text: "Cual era la profesion de Light al inicio de Death Note?",
+        options: ["Estudiante", "Policia", "Doctor", "Fiscal"],
+        correct_index: 0,
+        anime_id: 1535,
+    },
+    CuratedQuestion {
+        text: "Cual es el objetivo de Tanjiro en Demon Slayer?",
+        options: [
+            "Salvar a Nezuko",
+            "Ser Rey Pirata",
+            "Ser Hokage",
+            "Atrapar criminales con una libreta",
+        ],
+        correct_index: 0,
+        anime_id: 38000,
+    },
+    CuratedQuestion {
+        text: "Como se llama el grupo de cazadores en Demon Slayer?",
+        options: [
+            "Cuerpo de Exterminio de Demonios",
+            "Shinsengumi",
+            "Gotei 13",
+            "Guild of Mages",
+        ],
+        correct_index: 0,
+        anime_id: 38000,
+    },
+    CuratedQuestion {
+        text: "Que respiracion usa Tanjiro con mas frecuencia?",
+        options: [
+            "Respiracion del Agua",
+            "Respiracion del Trueno",
+            "Respiracion de la Niebla",
+            "Respiracion de la Roca",
+        ],
+        correct_index: 0,
+        anime_id: 38000,
+    },
+    CuratedQuestion {
+        text: "Quien es la hermana de Tanjiro?",
+        options: ["Nezuko", "Kanao", "Mitsuri", "Shinobu"],
+        correct_index: 0,
+        anime_id: 38000,
+    },
+    CuratedQuestion {
+        text: "Contra que amenaza lucha la humanidad en Attack on Titan?",
+        options: ["Titanes", "Hollows", "Demonios de la Luna", "Piratas"],
+        correct_index: 0,
+        anime_id: 16498,
+    },
+    CuratedQuestion {
+        text: "Como se llama el cuerpo militar de exploracion en Attack on Titan?",
+        options: ["Survey Corps", "Black Bulls", "Gotei 13", "Akatsuki"],
+        correct_index: 0,
+        anime_id: 16498,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista principal de Attack on Titan?",
+        options: [
+            "Eren Yeager",
+            "Levi Ackerman",
+            "Armin Arlert",
+            "Erwin Smith",
+        ],
+        correct_index: 0,
+        anime_id: 16498,
+    },
+    CuratedQuestion {
+        text: "Que ciudad esta protegida por murallas en Attack on Titan?",
+        options: ["Paradisis", "Shiganshina", "Westalis", "Konoha"],
+        correct_index: 1,
+        anime_id: 16498,
+    },
+    CuratedQuestion {
+        text: "Que energia se usa en Jujutsu Kaisen?",
+        options: ["Energia maldita", "Chakra", "Ki", "Haki"],
+        correct_index: 0,
+        anime_id: 40748,
+    },
+    CuratedQuestion {
+        text: "Quien es el profesor mas famoso de Jujutsu Kaisen?",
+        options: [
+            "Satoru Gojo",
+            "Kakashi Hatake",
+            "Kisuke Urahara",
+            "All Might",
+        ],
+        correct_index: 0,
+        anime_id: 40748,
+    },
+    CuratedQuestion {
+        text: "Que contiene el cuerpo de Yuji Itadori?",
+        options: [
+            "Dedos de Sukuna",
+            "Nueve colas",
+            "Hogyoku",
+            "Piedra filosofal",
+        ],
+        correct_index: 0,
+        anime_id: 40748,
+    },
+    CuratedQuestion {
+        text: "Como se llama la tecnica maxima en Jujutsu Kaisen?",
+        options: [
+            "Domain Expansion",
+            "Bankai",
+            "Ultra Instinct",
+            "Final Flash",
+        ],
+        correct_index: 0,
+        anime_id: 40748,
+    },
+    CuratedQuestion {
+        text: "Que disciplina usan Edward y Alphonse?",
+        options: [
+            "Alquimia",
+            "Ninjutsu",
+            "Magia de gremio",
+            "Respiracion del agua",
+        ],
+        correct_index: 0,
+        anime_id: 5114,
+    },
+    CuratedQuestion {
+        text: "Que perdio Edward Elric en su transmutacion fallida?",
+        options: [
+            "Un brazo y una pierna",
+            "La memoria",
+            "El ojo derecho",
+            "La voz",
+        ],
+        correct_index: 0,
+        anime_id: 5114,
+    },
+    CuratedQuestion {
+        text: "Como se llama el titulo estatal de Edward?",
+        options: [
+            "Fullmetal Alchemist",
+            "White Mage",
+            "Soul Reaper",
+            "Hero Number One",
+        ],
+        correct_index: 0,
+        anime_id: 5114,
+    },
+    CuratedQuestion {
+        text: "Que buscaban los hermanos Elric?",
+        options: [
+            "La Piedra Filosofal",
+            "One Piece",
+            "Dragon Balls",
+            "Death Note",
+        ],
+        correct_index: 0,
+        anime_id: 5114,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de Hunter x Hunter?",
+        options: ["Gon Freecss", "Killua Zoldyck", "Kurapika", "Leorio"],
+        correct_index: 0,
+        anime_id: 11061,
+    },
+    CuratedQuestion {
+        text: "Que energia se utiliza en Hunter x Hunter?",
+        options: ["Nen", "Chakra", "Reiatsu", "Mana"],
+        correct_index: 0,
+        anime_id: 11061,
+    },
+    CuratedQuestion {
+        text: "Cual es la profesion objetivo de Gon?",
+        options: ["Hunter", "Ninja", "Pirata", "Alquimista"],
+        correct_index: 0,
+        anime_id: 11061,
+    },
+    CuratedQuestion {
+        text: "De que familia viene Killua?",
+        options: ["Zoldyck", "Uchiha", "Elric", "Jaeger"],
+        correct_index: 0,
+        anime_id: 11061,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de My Hero Academia?",
+        options: [
+            "Izuku Midoriya",
+            "Katsuki Bakugo",
+            "Shoto Todoroki",
+            "Tenya Iida",
+        ],
+        correct_index: 0,
+        anime_id: 31964,
+    },
+    CuratedQuestion {
+        text: "Como se llama el heroe simbolo en My Hero Academia?",
+        options: ["All Might", "Endeavor", "Eraser Head", "Mirko"],
+        correct_index: 0,
+        anime_id: 31964,
+    },
+    CuratedQuestion {
+        text: "Que nombre tiene el poder heredado de Deku?",
+        options: [
+            "One For All",
+            "All For One",
+            "Full Cowling",
+            "Detroit Smash",
+        ],
+        correct_index: 0,
+        anime_id: 31964,
+    },
+    CuratedQuestion {
+        text: "En que academia estudian los heroes?",
+        options: [
+            "U.A.",
+            "Shuchiin",
+            "Tokyo Jujutsu High",
+            "Shinigami Academy",
+        ],
+        correct_index: 0,
+        anime_id: 31964,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de One Punch Man?",
+        options: ["Saitama", "Genos", "King", "Mumen Rider"],
+        correct_index: 0,
+        anime_id: 30276,
+    },
+    CuratedQuestion {
+        text: "Cual es el rasgo principal de Saitama?",
+        options: [
+            "Derrota enemigos de un golpe",
+            "Controla titanes",
+            "Usa un cuaderno mortal",
+            "Es rey de piratas",
+        ],
+        correct_index: 0,
+        anime_id: 30276,
+    },
+    CuratedQuestion {
+        text: "Que cyborg acompana a Saitama?",
+        options: ["Genos", "Drive Knight", "Metal Bat", "Bang"],
+        correct_index: 0,
+        anime_id: 30276,
+    },
+    CuratedQuestion {
+        text: "Que asociacion clasifica heroes en One Punch Man?",
+        options: [
+            "Hero Association",
+            "Magic Council",
+            "Akatsuki",
+            "Soul Society",
+        ],
+        correct_index: 0,
+        anime_id: 30276,
+    },
+    CuratedQuestion {
+        text: "Quien queda atrapado en SAO?",
+        options: ["Kirito", "Asuna", "Sinon", "Leafa"],
+        correct_index: 0,
+        anime_id: 11757,
+    },
+    CuratedQuestion {
+        text: "Como se llama el juego de Sword Art Online?",
+        options: [
+            "Sword Art Online",
+            "Aincrad Storm",
+            "Gun Gale",
+            "Ordinal Scale",
+        ],
+        correct_index: 0,
+        anime_id: 11757,
+    },
+    CuratedQuestion {
+        text: "Que apodo recibe Kirito?",
+        options: [
+            "Espadachin Negro",
+            "Heroe numero uno",
+            "Cazador blanco",
+            "Shinigami sustituto",
+        ],
+        correct_index: 0,
+        anime_id: 11757,
+    },
+    CuratedQuestion {
+        text: "Que pasa si mueres dentro de SAO en el primer arco?",
+        options: [
+            "Mueres en la vida real",
+            "Reapareces en ciudad",
+            "Pierdes oro",
+            "Reinicias nivel",
+        ],
+        correct_index: 0,
+        anime_id: 11757,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de Tokyo Ghoul?",
+        options: ["Ken Kaneki", "Touka Kirishima", "Hide", "Arima"],
+        correct_index: 0,
+        anime_id: 22319,
+    },
+    CuratedQuestion {
+        text: "Que necesita comer un ghoul para sobrevivir?",
+        options: [
+            "Carne humana",
+            "Semillas especiales",
+            "Sangre de titan",
+            "Fruta del diablo",
+        ],
+        correct_index: 0,
+        anime_id: 22319,
+    },
+    CuratedQuestion {
+        text: "Que organizacion investiga ghouls en Tokyo Ghoul?",
+        options: ["CCG", "CID", "Gotei 13", "Survey Corps"],
+        correct_index: 0,
+        anime_id: 22319,
+    },
+    CuratedQuestion {
+        text: "Que simboliza la mascara de Kaneki en combate?",
+        options: [
+            "Su identidad ghoul",
+            "Su rango militar",
+            "Su clan ninja",
+            "Su gremio",
+        ],
+        correct_index: 0,
+        anime_id: 22319,
+    },
+    CuratedQuestion {
+        text: "Quien es el protagonista de Fairy Tail?",
+        options: [
+            "Natsu Dragneel",
+            "Gray Fullbuster",
+            "Erza Scarlet",
+            "Laxus Dreyar",
+        ],
+        correct_index: 0,
+        anime_id: 6702,
+    },
+    CuratedQuestion {
+        text: "Como se llama el gremio principal de Fairy Tail?",
+        options: ["Fairy Tail", "Black Bulls", "Blue Pegasus", "Lamia Scale"],
+        correct_index: 0,
+        anime_id: 6702,
+    },
+    CuratedQuestion {
+        text: "Que magia usa principalmente Natsu?",
+        options: [
+            "Dragon Slayer de fuego",
+            "Magia de cartas",
+            "Respiracion solar",
+            "Alquimia",
+        ],
+        correct_index: 0,
+        anime_id: 6702,
+    },
+    CuratedQuestion {
+        text: "Que companera celestial acompana a Natsu?",
+        options: [
+            "Lucy Heartfilia",
+            "Juvia Lockser",
+            "Levy McGarden",
+            "Wendy Marvell",
+        ],
+        correct_index: 0,
+        anime_id: 6702,
+    },
+];
+
 #[tonic::async_trait]
 impl QuestionsService for QuestionsSvc {
     async fn search_anime(
@@ -229,10 +753,32 @@ impl QuestionsService for QuestionsSvc {
 
     async fn generate_question(
         &self,
-        _request: Request<GenerateQuestionRequest>,
+        request: Request<GenerateQuestionRequest>,
     ) -> Result<Response<GenerateQuestionResponse>, Status> {
-        info!("GenerateQuestion request received");
+        let req = request.into_inner();
+        let room_id = if req.room_id.trim().is_empty() {
+            "global-demo-room".to_string()
+        } else {
+            req.room_id
+        };
 
+        info!(room_id = %room_id, "GenerateQuestion request received");
+
+        let use_curated = rand::thread_rng().gen_bool(0.75);
+
+        if use_curated {
+            if let Some((question, index)) =
+                generate_curated_question(&room_id, &self.recent_curated_by_room).await
+            {
+                info!(index, "GenerateQuestion using curated pool index={index}");
+                return Ok(Response::new(GenerateQuestionResponse {
+                    question: Some(question),
+                }));
+            }
+            warn!("Curated pool unavailable; falling back to dynamic template");
+        }
+
+        info!("GenerateQuestion using dynamic template");
         match self.adapter.fetch_top_anime().await {
             Ok(mut animes) if animes.len() >= 4 => {
                 animes.shuffle(&mut rand::thread_rng());
@@ -243,7 +789,7 @@ impl QuestionsService for QuestionsSvc {
 
                 let question = build_varied_question(options).unwrap_or_else(|| Question {
                     id: Uuid::new_v4().to_string(),
-                    text: "Cual de estos animes tiene el titulo correcto?".to_string(),
+                    text: "Quien es el protagonista de Naruto?".to_string(),
                     option_a: options[0].title.clone(),
                     option_b: options[1].title.clone(),
                     option_c: options[2].title.clone(),
@@ -257,19 +803,86 @@ impl QuestionsService for QuestionsSvc {
                 }))
             }
             Ok(_) => {
-                warn!("Top anime response returned less than 4 elements; using fallback question.");
+                warn!("Top anime response returned less than 4 elements; using curated fallback");
+                let question = generate_curated_question(&room_id, &self.recent_curated_by_room)
+                    .await
+                    .map(|(question, _)| question)
+                    .unwrap_or_else(fallback_question);
                 Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(fallback_question()),
+                    question: Some(question),
                 }))
             }
             Err(e) => {
-                warn!(error = %e, "GenerateQuestion using fallback due to Jikan/circuit issue");
+                warn!(error = %e, "Dynamic generation failed; using curated fallback");
+                let question = generate_curated_question(&room_id, &self.recent_curated_by_room)
+                    .await
+                    .map(|(question, _)| question)
+                    .unwrap_or_else(fallback_question);
                 Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(fallback_question()),
+                    question: Some(question),
                 }))
             }
         }
     }
+}
+
+async fn generate_curated_question(
+    room_id: &str,
+    recent_curated_by_room: &Arc<Mutex<HashMap<String, VecDeque<usize>>>>,
+) -> Option<(Question, usize)> {
+    let selected_index = {
+        let mut recent = recent_curated_by_room.lock().await;
+        let room_recent = recent.entry(room_id.to_string()).or_default();
+
+        let mut chosen = rand::thread_rng().gen_range(0..CURATED_QUESTIONS.len());
+        for _ in 0..10 {
+            let candidate = rand::thread_rng().gen_range(0..CURATED_QUESTIONS.len());
+            if !room_recent.contains(&candidate) {
+                chosen = candidate;
+                break;
+            }
+            chosen = candidate;
+        }
+
+        room_recent.push_back(chosen);
+        while room_recent.len() > 5 {
+            room_recent.pop_front();
+        }
+
+        chosen
+    };
+    let curated = &CURATED_QUESTIONS[selected_index];
+
+    if curated.correct_index >= curated.options.len() {
+        return None;
+    }
+    if curated.options.iter().any(|opt| opt.trim().is_empty()) {
+        return None;
+    }
+
+    let mut seen = HashSet::new();
+    if !curated.options.iter().all(|opt| seen.insert(*opt)) {
+        return None;
+    }
+
+    let mut indexed: Vec<(usize, &str)> = curated.options.iter().copied().enumerate().collect();
+    indexed.shuffle(&mut rand::thread_rng());
+    let correct_pos = indexed
+        .iter()
+        .position(|(idx, _)| *idx == curated.correct_index)?;
+
+    let question = Question {
+        id: Uuid::new_v4().to_string(),
+        text: curated.text.to_string(),
+        option_a: indexed[0].1.to_string(),
+        option_b: indexed[1].1.to_string(),
+        option_c: indexed[2].1.to_string(),
+        option_d: indexed[3].1.to_string(),
+        correct_option: ANSWER_LABELS[correct_pos].to_string(),
+        anime_id: curated.anime_id,
+    };
+    info!(question_id = %question.id, index = selected_index, "Curated question generated question_id=... index=...");
+    Some((question, selected_index))
 }
 
 fn map_jikan_anime(a: JikanAnime) -> Anime {
@@ -290,7 +903,7 @@ fn map_jikan_anime(a: JikanAnime) -> Anime {
 fn fallback_question() -> Question {
     Question {
         id: format!("fallback-{}", Uuid::new_v4()),
-        text: "Cual de estos animes tiene el titulo correcto?".to_string(),
+        text: "Quien es el protagonista de Naruto?".to_string(),
         option_a: "Ichigo Kurosaki".to_string(),
         option_b: "Naruto Uzumaki".to_string(),
         option_c: "Monkey D. Luffy".to_string(),
@@ -395,7 +1008,7 @@ fn build_varied_question(options: &[Anime]) -> Option<Question> {
         }
         _ => Some(Question {
             id: Uuid::new_v4().to_string(),
-            text: "Cual de estos animes tiene el titulo correcto?".to_string(),
+            text: "Quien es el protagonista de Naruto?".to_string(),
             option_a: options[0].title.clone(),
             option_b: options[1].title.clone(),
             option_c: options[2].title.clone(),
@@ -431,6 +1044,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let svc = QuestionsSvc {
         adapter: Arc::new(adapter),
+        recent_curated_by_room: Arc::new(Mutex::new(HashMap::new())),
     };
 
     info!(%addr, %jikan_base_url, http_timeout_secs, breaker_cooldown_secs, "Starting questions-service");
