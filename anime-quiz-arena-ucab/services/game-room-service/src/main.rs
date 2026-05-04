@@ -195,18 +195,22 @@ impl GameRoomService for GameRoomSvc {
             return Err(Status::failed_precondition("room is not started"));
         }
 
-        let joined: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM room_players WHERE room_id = $1 AND user_id = $2 LIMIT 1",
-        )
-        .bind(room_id)
-        .bind(user_id)
-        .fetch_optional(&self.db)
-        .await
-        .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
+        let joined: bool = sqlx::query_scalar(
+    "SELECT EXISTS(
+        SELECT 1
+        FROM room_players
+        WHERE room_id = $1 AND user_id = $2
+    )",
+)
+                    .bind(room_id)
+                    .bind(user_id)
+                    .fetch_one(&self.db)
+                    .await
+                    .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
 
-        if joined.is_none() {
-            return Err(Status::failed_precondition("user is not in the room"));
-        }
+                            if !joined {
+                             return Err(Status::failed_precondition("user is not in the room"));
+}
 
         let is_correct = payload.selected_option.trim() == payload.correct_option.trim();
         info!(room_id = %room_id, user_id = %user_id, question_id = %payload.question_id, correct = is_correct, "Answer submitted");
