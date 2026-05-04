@@ -1,0 +1,2 @@
+:root{--yellow:#ffc526;--blue:#40b4e5;--green:#047732;--black:#12100c;--bg:#f8fbfd}
+body{margin:0;font-family:Inter,system-ui;background:var(--bg);color:var(--black)} .container{max-width:1000px;margin:0 auto;padding:20px} .card{background:#fff;border-radius:16px;box-shadow:0 8px 25px #0001;padding:16px;margin:12px 0;display:flex;flex-direction:column;gap:8px} button{background:var(--blue);color:white;border:none;border-radius:12px;padding:10px 14px;font-weight:700} h1{color:var(--blue)} b{color:var(--yellow)}
