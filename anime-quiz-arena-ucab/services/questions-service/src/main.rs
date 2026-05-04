@@ -787,16 +787,23 @@ impl QuestionsService for QuestionsSvc {
                     .first()
                     .ok_or_else(|| Status::internal("No anime available for question"))?;
 
-                let question = build_varied_question(options).unwrap_or_else(|| Question {
-                    id: Uuid::new_v4().to_string(),
-                    text: "Quien es el protagonista de Naruto?".to_string(),
-                    option_a: options[0].title.clone(),
-                    option_b: options[1].title.clone(),
-                    option_c: options[2].title.clone(),
-                    option_d: options[3].title.clone(),
-                    correct_option: "A".to_string(),
-                    anime_id: correct.id,
-                });
+                let question = build_varied_question(options).unwrap_or_else(|| {
+    let correct_index = options
+        .iter()
+        .position(|anime| anime.id == correct.id)
+        .unwrap_or(0);
+
+    Question {
+        id: Uuid::new_v4().to_string(),
+        text: "Cual de estos titulos corresponde a un anime real?".to_string(),
+        option_a: options[0].title.clone(),
+        option_b: options[1].title.clone(),
+        option_c: options[2].title.clone(),
+        option_d: options[3].title.clone(),
+        correct_option: ANSWER_LABELS[correct_index].to_string(),
+        anime_id: correct.id,
+    }
+});
 
                 Ok(Response::new(GenerateQuestionResponse {
                     question: Some(question),
@@ -1007,15 +1014,15 @@ fn build_varied_question(options: &[Anime]) -> Option<Question> {
             })
         }
         _ => Some(Question {
-            id: Uuid::new_v4().to_string(),
-            text: "Quien es el protagonista de Naruto?".to_string(),
-            option_a: options[0].title.clone(),
-            option_b: options[1].title.clone(),
-            option_c: options[2].title.clone(),
-            option_d: options[3].title.clone(),
-            correct_option: "A".to_string(),
-            anime_id: options[0].id,
-        }),
+    id: Uuid::new_v4().to_string(),
+    text: "Cual de estos titulos corresponde a un anime real?".to_string(),
+    option_a: options[0].title.clone(),
+    option_b: options[1].title.clone(),
+    option_c: options[2].title.clone(),
+    option_d: options[3].title.clone(),
+    correct_option: "A".to_string(),
+    anime_id: options[0].id,
+}),
     }
 }
 
