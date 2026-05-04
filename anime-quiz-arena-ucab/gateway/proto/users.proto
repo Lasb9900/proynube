@@ -1,0 +1,43 @@
+syntax = "proto3";
+package animequiz.users.v1;
+
+message User {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string created_at = 4;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message LoginBasicRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginBasicResponse {
+  bool success = 1;
+  User user = 2;
+}
+
+service UsersService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc LoginBasic(LoginBasicRequest) returns (LoginBasicResponse);
+}
