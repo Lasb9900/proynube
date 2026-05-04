@@ -3,7 +3,7 @@ use std::env;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 pub mod users {
@@ -19,10 +19,6 @@ use users::{
 #[derive(Clone)]
 struct UsersSvc {
     pool: PgPool,
-}
-
-fn decode_error_status(field: &str, e: sqlx::Error) -> Status {
-    Status::unavailable(format!("failed to decode {field}: {e}"))
 }
 
 #[tonic::async_trait]
@@ -99,18 +95,10 @@ impl UsersService for UsersSvc {
 
         let row = row.ok_or_else(|| Status::not_found("user not found"))?;
 
-        let id: Uuid = row
-            .try_get("id")
-            .map_err(|e| decode_error_status("id", e))?;
-        let username: String = row
-            .try_get("username")
-            .map_err(|e| decode_error_status("username", e))?;
-        let email: String = row
-            .try_get("email")
-            .map_err(|e| decode_error_status("email", e))?;
-        let created_at: DateTime<Utc> = row
-            .try_get("created_at")
-            .map_err(|e| decode_error_status("created_at", e))?;
+        let id: Uuid = row.get("id");
+        let username: String = row.get("username");
+        let email: String = row.get("email");
+        let created_at: DateTime<Utc> = row.get("created_at");
 
         info!(id = %id, "User queried");
 
@@ -136,8 +124,6 @@ impl UsersService for UsersSvc {
             ));
         }
 
-        info!(email = %req.email, "Login attempt");
-
         let row = sqlx::query(
             "SELECT id, username, email, password, created_at FROM users WHERE email = $1",
         )
@@ -146,33 +132,20 @@ impl UsersService for UsersSvc {
         .await
         .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
 
-        let row = row.ok_or_else(|| {
-            warn!(email = %req.email, "Login failed: user not found");
-            Status::unauthenticated("invalid credentials")
-        })?;
+        let row = row.ok_or_else(|| Status::unauthenticated("invalid credentials"))?;
 
-        let saved_password: String = row
-            .try_get("password")
-            .map_err(|e| decode_error_status("password", e))?;
+        let saved_password: String = row.get("password");
         if saved_password != req.password {
-            warn!(email = %req.email, "Login failed: password mismatch");
+            info!(email = %req.email, "Login failed");
             return Err(Status::unauthenticated("invalid credentials"));
         }
 
-        let id: Uuid = row
-            .try_get("id")
-            .map_err(|e| decode_error_status("id", e))?;
-        let username: String = row
-            .try_get("username")
-            .map_err(|e| decode_error_status("username", e))?;
-        let email: String = row
-            .try_get("email")
-            .map_err(|e| decode_error_status("email", e))?;
-        let created_at: DateTime<Utc> = row
-            .try_get("created_at")
-            .map_err(|e| decode_error_status("created_at", e))?;
+        let id: Uuid = row.get("id");
+        let username: String = row.get("username");
+        let email: String = row.get("email");
+        let created_at: DateTime<Utc> = row.get("created_at");
 
-        info!(email = %email, id = %id, "Login success");
+        info!(email = %email, "Login success");
 
         Ok(Response::new(LoginBasicResponse {
             success: true,
@@ -193,20 +166,11 @@ async fn init_db(pool: &PgPool) -> Result<(), sqlx::Error> {
             username VARCHAR NOT NULL,
             email VARCHAR NOT NULL UNIQUE,
             password VARCHAR NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL
+            created_at TIMESTAMP NOT NULL
         )",
     )
     .execute(pool)
     .await?;
-
-    sqlx::query(
-        "ALTER TABLE users
-         ALTER COLUMN created_at TYPE TIMESTAMPTZ
-         USING created_at AT TIME ZONE 'UTC'",
-    )
-    .execute(pool)
-    .await?;
-
     Ok(())
 }
 
