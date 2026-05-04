@@ -1,0 +1,4 @@
+syntax="proto3"; package animequiz.liveevents.v1;
+message GameEvent{string room_id=1; string user_id=2; string event_type=3; string message=4; int32 points=5; string timestamp=6;}
+message GameStreamRequest{GameEvent event=1;} message GameStreamResponse{GameEvent event=1;}
+service LiveEventsService{rpc GameStream(stream GameStreamRequest) returns (stream GameStreamResponse);}
