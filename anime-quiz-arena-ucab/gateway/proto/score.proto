@@ -1,0 +1,50 @@
+syntax = "proto3";
+package animequiz.score.v1;
+
+message ScoreEntry {
+  string user_id = 1;
+  int32 points = 2;
+  int32 rank = 3;
+}
+
+message AddScoreRequest {
+  string room_id = 1;
+  string user_id = 2;
+  int32 points = 3;
+}
+
+message AddScoreResponse {
+  string user_id = 1;
+  int32 total_points = 2;
+}
+
+message GetScoreRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message GetScoreResponse {
+  string user_id = 1;
+  int32 points = 2;
+}
+
+message GetLeaderboardRequest {
+  string room_id = 1;
+  int32 limit = 2;
+}
+
+message GetLeaderboardResponse {
+  repeated ScoreEntry entries = 1;
+}
+
+message WatchLeaderboardRequest {
+  string room_id = 1;
+  int32 limit = 2;
+}
+
+service ScoreService {
+  rpc AddScore(AddScoreRequest) returns (AddScoreResponse);
+  rpc GetScore(GetScoreRequest) returns (GetScoreResponse);
+  rpc GetLeaderboard(GetLeaderboardRequest) returns (GetLeaderboardResponse);
+  rpc WatchLeaderboard(WatchLeaderboardRequest) returns (stream GetLeaderboardResponse);
+}
