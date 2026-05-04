@@ -1,11 +1,15 @@
 [package]
-name="live_events_service"
-version="0.1.0"
-edition="2021"
+name = "live_events_service"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-tokio={version="1",features=["full"]}
-tonic="0.12"
-prost="0.13"
-tracing="0.1"
-tracing-subscriber="0.3"
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12"
+prost = "0.13"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio-stream = "0.1"
+
+[build-dependencies]
+tonic-build = "0.12"
