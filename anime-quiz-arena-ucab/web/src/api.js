@@ -59,9 +59,9 @@ export const createRoom = (name, createdBy) => req("/api/rooms", {
     method: "POST",
     body: JSON.stringify({ name, created_by: createdBy }),
 });
-export const joinRoom = (roomId, userId) => req(`/api/rooms/${roomId}/join`, {
+export const joinRoom = (roomId, userId, username) => req(`/api/rooms/${roomId}/join`, {
     method: "POST",
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId, username: username ?? "" }),
 });
 export const startGame = (roomId) => req(`/api/rooms/${roomId}/start`, { method: "POST", body: "{}" });
 export const submitAnswer = (roomId, userId, questionId, selectedOption, correctOption) => req(`/api/rooms/${roomId}/answer`, {
@@ -82,3 +82,33 @@ export async function getLeaderboard(roomId, limit = 10) {
     };
 }
 export const endGame = (roomId) => req(`/api/rooms/${roomId}/end`, { method: "POST", body: "{}" });
+function normalizeRoomStatePlayer(p) {
+    return {
+        userId: p.userId ?? p.user_id ?? "",
+        username: p.username ?? "",
+        answeredCurrentQuestion: p.answeredCurrentQuestion ?? p.answered_current_question ?? false,
+        ready: p.ready ?? true,
+        joinedAt: p.joinedAt ?? p.joined_at ?? "",
+    };
+}
+export async function getRoomState(roomId, questionId) {
+    const q = questionId ? `?question_id=${encodeURIComponent(questionId)}` : "";
+    const data = await req(`/api/rooms/${roomId}/state${q}`);
+    return {
+        room: data.room
+            ? {
+                id: data.room.id ?? "",
+                name: data.room.name ?? "",
+                status: data.room.status ?? "",
+                createdBy: data.room.createdBy ?? data.room.created_by ?? "",
+                createdAt: data.room.createdAt ?? data.room.created_at ?? "",
+            }
+            : null,
+        players: Array.isArray(data.players)
+            ? data.players.map(normalizeRoomStatePlayer)
+            : [],
+        totalPlayers: data.totalPlayers ?? data.total_players ?? 0,
+        answeredCount: data.answeredCount ?? data.answered_count ?? 0,
+        allAnswered: data.allAnswered ?? data.all_answered ?? false,
+    };
+}
