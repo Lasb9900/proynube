@@ -37,6 +37,7 @@ struct RoomRow {
 #[derive(FromRow)]
 struct RoomPlayerRow {
     user_id: Uuid,
+    username: String,
     ready: bool,
     joined_at: NaiveDateTime,
 }
@@ -129,11 +130,19 @@ impl GameRoomService for GameRoomSvc {
             return Err(Status::failed_precondition("room is finished"));
         }
 
+        let fallback_username: String = user_id.to_string().chars().take(8).collect();
+        let username = if payload.username.trim().is_empty() {
+            fallback_username
+        } else {
+            payload.username.trim().to_string()
+        };
+
         sqlx::query(
-            "INSERT INTO room_players (room_id, user_id, joined_at, ready) VALUES ($1, $2, $3, true) ON CONFLICT (room_id, user_id) DO NOTHING",
+            "INSERT INTO room_players (room_id, user_id, username, joined_at, ready) VALUES ($1, $2, $3, $4, true) ON CONFLICT (room_id, user_id) DO UPDATE SET username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username ELSE room_players.username END, ready = true",
         )
         .bind(room_id)
         .bind(user_id)
+        .bind(username)
         .bind(Utc::now().naive_utc())
         .execute(&self.db)
         .await
@@ -313,7 +322,7 @@ impl GameRoomService for GameRoomSvc {
         let has_question = !current_q.is_empty();
 
         let player_rows = sqlx::query_as::<_, RoomPlayerRow>(
-            "SELECT user_id, ready, joined_at FROM room_players WHERE room_id = $1 ORDER BY joined_at ASC",
+            "SELECT user_id, username, ready, joined_at FROM room_players WHERE room_id = $1 ORDER BY joined_at ASC",
         )
         .bind(room_id)
         .fetch_all(&self.db)
@@ -347,8 +356,11 @@ impl GameRoomService for GameRoomSvc {
             } else {
                 false
             };
+            let fallback_username: String = player.user_id.to_string().chars().take(8).collect();
+            let username = if player.username.trim().is_empty() { fallback_username } else { player.username };
             players.push(RoomPlayer {
                 user_id: player.user_id.to_string(),
+                username,
                 answered_current_question,
                 ready: player.ready,
                 joined_at: player.joined_at.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -406,6 +418,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .execute(&db)
     .await?;
+    sqlx::query("ALTER TABLE room_players ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''")
+        .execute(&db)
+        .await?;
     sqlx::query("ALTER TABLE room_players ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT now()")
         .execute(&db)
         .await?;

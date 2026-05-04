@@ -67,7 +67,7 @@ message GatewayRoom {
 }
 
 message GatewayCreateRoomRequest { string name = 1; string created_by = 2; }
-message GatewayJoinRoomRequest { string room_id = 1; string user_id = 2; }
+message GatewayJoinRoomRequest { string room_id = 1; string user_id = 2; string username = 3; }
 message GatewayRoomIdRequest { string room_id = 1; }
 message GatewayRoomResponse { GatewayRoom room = 1; }
 
@@ -92,9 +92,10 @@ message GatewayRoomStateRequest {
 
 message GatewayRoomPlayer {
   string user_id = 1;
-  bool answered_current_question = 2;
-  bool ready = 3;
-  string joined_at = 4;
+  string username = 2;
+  bool answered_current_question = 3;
+  bool ready = 4;
+  string joined_at = 5;
 }
 
 message GatewayRoomStateResponse {

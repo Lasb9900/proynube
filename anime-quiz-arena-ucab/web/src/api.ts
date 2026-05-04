@@ -76,10 +76,10 @@ export const createRoom = (name: string, createdBy: string) =>
     body: JSON.stringify({ name, created_by: createdBy }),
   });
 
-export const joinRoom = (roomId: string, userId: string) =>
+export const joinRoom = (roomId: string, userId: string, username?: string) =>
   req(`/api/rooms/${roomId}/join`, {
     method: "POST",
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId, username: username ?? "" }),
   });
 
 export const startGame = (roomId: string) =>
@@ -118,6 +118,7 @@ export const endGame = (roomId: string) =>
 function normalizeRoomStatePlayer(p: any) {
   return {
     userId: p.userId ?? p.user_id ?? "",
+    username: p.username ?? "",
     answeredCurrentQuestion:
       p.answeredCurrentQuestion ?? p.answered_current_question ?? false,
     ready: p.ready ?? true,
