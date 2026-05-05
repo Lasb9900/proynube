@@ -9,6 +9,11 @@ use tokio::sync::Mutex;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{error, info, warn};
 use uuid::Uuid;
+use axum::{routing::get, Json, Router};
+use serde_json::json;
+use std::env;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 
 pub mod questions {
     tonic::include_proto!("animequiz.questions.v1");
@@ -1026,19 +1031,33 @@ fn build_varied_question(options: &[Anime]) -> Option<Question> {
     }
 }
 
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "service": "questions-service"
+    }))
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let addr =
-        std::env::var("QUESTIONS_SERVICE_ADDR").unwrap_or_else(|_| "0.0.0.0:50052".to_string());
+    let grpc_addr: SocketAddr = env::var("QUESTIONS_SERVICE_ADDR")
+        .unwrap_or_else(|_| {
+            let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50052".to_string());
+            format!("0.0.0.0:{grpc_port}")
+        })
+        .parse()?;
+
     let jikan_base_url =
-        std::env::var("JIKAN_BASE_URL").unwrap_or_else(|_| "https://api.jikan.moe/v4".to_string());
-    let http_timeout_secs: u64 = std::env::var("HTTP_TIMEOUT_SECS")
+        env::var("JIKAN_BASE_URL").unwrap_or_else(|_| "https://api.jikan.moe/v4".to_string());
+
+    let http_timeout_secs: u64 = env::var("HTTP_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
-    let breaker_cooldown_secs: u64 = std::env::var("CB_COOLDOWN_SECS")
+
+    let breaker_cooldown_secs: u64 = env::var("CB_COOLDOWN_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(30);
@@ -1054,12 +1073,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         recent_curated_by_room: Arc::new(Mutex::new(HashMap::new())),
     };
 
-    info!(%addr, %jikan_base_url, http_timeout_secs, breaker_cooldown_secs, "Starting questions-service");
+    info!(
+        %grpc_addr,
+        %jikan_base_url,
+        http_timeout_secs,
+        breaker_cooldown_secs,
+        "Starting questions-service gRPC"
+    );
 
-    Server::builder()
-        .add_service(QuestionsServiceServer::new(svc))
-        .serve(addr.parse()?)
-        .await?;
+    let grpc_server = async move {
+        Server::builder()
+            .add_service(QuestionsServiceServer::new(svc))
+            .serve(grpc_addr)
+            .await
+            .map_err(anyhow::Error::from)
+    };
+
+    if let Ok(port) = env::var("PORT") {
+        let http_addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+
+        let app = Router::new().route("/health", get(health));
+
+        info!("Starting questions-service HTTP health on {}", http_addr);
+
+        let http_server = async move {
+            let listener = TcpListener::bind(http_addr).await?;
+            axum::serve(listener, app).await?;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        tokio::try_join!(grpc_server, http_server)?;
+    } else {
+        grpc_server.await?;
+    }
 
     Ok(())
 }

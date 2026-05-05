@@ -384,15 +384,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@rooms-db:5432/rooms_db".to_string());
+
     let score_service_addr =
         env::var("SCORE_SERVICE_ADDR").unwrap_or_else(|_| "score-service:50054".to_string());
 
-    info!("Starting game-room-service on 0.0.0.0:50053");
+    let port = env::var("PORT").unwrap_or_else(|_| "50053".to_string());
+    let addr = format!("0.0.0.0:{port}")
+        .parse::<std::net::SocketAddr>()?;
+
+    info!("Starting game-room-service on {}", addr);
 
     let db = PgPoolOptions::new()
         .max_connections(10)
         .connect(&database_url)
         .await?;
+
     info!("Connected to PostgreSQL");
 
     sqlx::query(
@@ -411,6 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "CREATE TABLE IF NOT EXISTS room_players (
             room_id UUID NOT NULL,
             user_id UUID NOT NULL,
+            username TEXT NOT NULL DEFAULT '',
             joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
             ready BOOLEAN NOT NULL DEFAULT true,
             PRIMARY KEY (room_id, user_id)
@@ -418,23 +425,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .execute(&db)
     .await?;
-    sqlx::query("ALTER TABLE room_players ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''")
-        .execute(&db)
-        .await?;
-    sqlx::query("ALTER TABLE room_players ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-        .execute(&db)
-        .await?;
+
     sqlx::query(
-        "ALTER TABLE room_players ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE room_players 
+         ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''",
     )
     .execute(&db)
     .await?;
-    sqlx::query("CREATE TABLE IF NOT EXISTS room_answers (room_id UUID NOT NULL, question_id TEXT NOT NULL, user_id UUID NOT NULL, selected_option TEXT NOT NULL, correct_option TEXT NOT NULL, is_correct BOOLEAN NOT NULL, answered_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (room_id, question_id, user_id))")
-        .execute(&db)
-        .await?;
+
+    sqlx::query(
+        "ALTER TABLE room_players 
+         ADD COLUMN IF NOT EXISTS joined_at TIMESTAMP NOT NULL DEFAULT NOW()",
+    )
+    .execute(&db)
+    .await?;
+
+    sqlx::query(
+        "ALTER TABLE room_players 
+         ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT true",
+    )
+    .execute(&db)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS room_answers (
+            room_id UUID NOT NULL,
+            question_id TEXT NOT NULL,
+            user_id UUID NOT NULL,
+            selected_option TEXT NOT NULL,
+            correct_option TEXT NOT NULL,
+            is_correct BOOLEAN NOT NULL,
+            answered_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (room_id, question_id, user_id)
+        )",
+    )
+    .execute(&db)
+    .await?;
+
     info!("Game room tables ready");
 
-    let addr = "0.0.0.0:50053".parse()?;
     let service = GameRoomSvc {
         db,
         score_service_addr,

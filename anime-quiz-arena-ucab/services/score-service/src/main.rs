@@ -1,6 +1,8 @@
+use axum::{routing::get, Json, Router};
 use redis::AsyncCommands;
-use std::{env, pin::Pin, time::Duration};
-use tokio::{sync::mpsc, time::interval};
+use serde_json::json;
+use std::{env, net::SocketAddr, pin::Pin, time::Duration};
+use tokio::{net::TcpListener, sync::mpsc, time::interval};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{error, info};
@@ -184,14 +186,24 @@ impl ScoreService for ScoreSvc {
     }
 }
 
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "service": "score-service"
+    }))
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let addr = "0.0.0.0:50054".parse()?;
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50054".to_string());
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
+
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis:6379".to_string());
 
-    info!("Starting score-service on 0.0.0.0:50054");
+    info!("Starting score-service gRPC on {}", grpc_addr);
+
     let redis_client = redis::Client::open(redis_url.as_str())?;
 
     let mut conn = redis_client
@@ -201,15 +213,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!(error = %e, "Failed to connect to Redis");
             e
         })?;
+
     let pong: String = redis::cmd("PING").query_async(&mut conn).await?;
     info!(pong = %pong, "Connected to Redis");
 
     let service = ScoreSvc { redis_client };
 
-    Server::builder()
-        .add_service(ScoreServiceServer::new(service))
-        .serve(addr)
-        .await?;
+    let grpc_server = async move {
+        Server::builder()
+            .add_service(ScoreServiceServer::new(service))
+            .serve(grpc_addr)
+            .await
+            .map_err(anyhow::Error::from)
+    };
+
+    if let Ok(port) = env::var("PORT") {
+        let http_addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+
+        let app = Router::new().route("/health", get(health));
+
+        info!("Starting score-service HTTP health on {}", http_addr);
+
+        let http_server = async move {
+            let listener = TcpListener::bind(http_addr).await?;
+            axum::serve(listener, app).await?;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        tokio::try_join!(grpc_server, http_server)?;
+    } else {
+        grpc_server.await?;
+    }
 
     Ok(())
 }
