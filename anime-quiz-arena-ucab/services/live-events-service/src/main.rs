@@ -1,6 +1,8 @@
-use std::pin::Pin;
+use std::{env, net::SocketAddr, pin::Pin};
 
-use tokio::sync::mpsc;
+use axum::{routing::get, Json, Router};
+use serde_json::json;
+use tokio::{net::TcpListener, sync::mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{info, warn};
@@ -22,9 +24,11 @@ fn validate_event(event: &GameEvent) -> Result<(), Status> {
     if event.room_id.trim().is_empty() {
         return Err(Status::invalid_argument("room_id must not be empty"));
     }
+
     if event.event_type.trim().is_empty() {
         return Err(Status::invalid_argument("event_type must not be empty"));
     }
+
     Ok(())
 }
 
@@ -37,6 +41,13 @@ fn event_ack_message(event_type: &str) -> &'static str {
         "GameFinished" => "Game finished",
         _ => "Unknown event type",
     }
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "service": "live-events-service"
+    }))
 }
 
 #[tonic::async_trait]
@@ -86,6 +97,7 @@ impl LiveEventsService for LiveEventsSvc {
                         );
 
                         let ack = event_ack_message(event.event_type.as_str());
+
                         if ack == "Unknown event type" {
                             warn!(event_type = %event.event_type, "Unknown event type");
                         }
@@ -101,7 +113,7 @@ impl LiveEventsService for LiveEventsSvc {
                             }),
                         })
                     }
-                    Err(e) => Err(Status::internal(format!("stream read error: {e}"))),
+                    Err(error) => Err(Status::internal(format!("stream read error: {error}"))),
                 };
 
                 if tx.send(response).await.is_err() {
@@ -117,16 +129,38 @@ impl LiveEventsService for LiveEventsSvc {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let addr = "0.0.0.0:50055".parse()?;
-    info!("Starting live-events-service on 0.0.0.0:50055");
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50055".to_string());
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
 
-    Server::builder()
-        .add_service(LiveEventsServiceServer::new(LiveEventsSvc))
-        .serve(addr)
-        .await?;
+    info!("Starting live-events-service gRPC on {}", grpc_addr);
+
+    let grpc_server = async move {
+        Server::builder()
+            .add_service(LiveEventsServiceServer::new(LiveEventsSvc))
+            .serve(grpc_addr)
+            .await
+            .map_err(anyhow::Error::from)
+    };
+
+    if let Ok(port) = env::var("PORT") {
+        let http_addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+        let app = Router::new().route("/health", get(health));
+
+        info!("Starting live-events-service HTTP health on {}", http_addr);
+
+        let http_server = async move {
+            let listener = TcpListener::bind(http_addr).await?;
+            axum::serve(listener, app).await?;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        tokio::try_join!(grpc_server, http_server)?;
+    } else {
+        grpc_server.await?;
+    }
 
     Ok(())
 }
