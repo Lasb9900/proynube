@@ -1,9 +1,12 @@
 use std::env;
 
+use axum::{routing::get, Json, Router};
 use chrono::{DateTime, NaiveDateTime, Utc};
+use serde_json::json;
 use sqlx::{PgPool, Row};
+use tokio::net::TcpListener;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub mod users {
@@ -12,8 +15,7 @@ pub mod users {
 
 use users::users_service_server::{UsersService, UsersServiceServer};
 use users::{
-    CreateUserRequest, CreateUserResponse, GetUserRequest, GetUserResponse, LoginBasicRequest,
-    LoginBasicResponse, User,
+    CreateUserRequest, GetUserRequest, LoginBasicRequest, LoginBasicResponse, User, UserResponse,
 };
 
 #[derive(Clone)]
@@ -21,33 +23,68 @@ struct UsersSvc {
     pool: PgPool,
 }
 
-fn naive_to_rfc3339(created_at: NaiveDateTime) -> String {
-    DateTime::<Utc>::from_naive_utc_and_offset(created_at, Utc).to_rfc3339()
+async fn init_db(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE users
+        ALTER COLUMN created_at TYPE TIMESTAMPTZ
+        USING created_at AT TIME ZONE 'UTC'
+        "#,
+    )
+    .execute(pool)
+    .await
+    .or_else(|err| {
+        warn!(error = %err, "created_at TIMESTAMPTZ migration skipped or already compatible");
+        Ok::<_, sqlx::Error>(sqlx::postgres::PgQueryResult::default())
+    })?;
+
+    Ok(())
 }
 
-fn decode_user_without_password(row: &sqlx::postgres::PgRow) -> Result<User, Status> {
-    let id: Uuid = row
-        .try_get("id")
-        .map_err(|e| Status::unavailable(format!("failed to decode id: {e}")))?;
+fn decode_created_at(row: &sqlx::postgres::PgRow) -> Result<String, sqlx::Error> {
+    if let Ok(value) = row.try_get::<DateTime<Utc>, _>("created_at") {
+        return Ok(value.to_rfc3339());
+    }
 
-    let username: String = row
-        .try_get("username")
-        .map_err(|e| Status::unavailable(format!("failed to decode username: {e}")))?;
+    let value = row.try_get::<NaiveDateTime, _>("created_at")?;
+    Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc).to_rfc3339())
+}
 
-    let email: String = row
-        .try_get("email")
-        .map_err(|e| Status::unavailable(format!("failed to decode email: {e}")))?;
-
-    let created_at: NaiveDateTime = row
-        .try_get("created_at")
-        .map_err(|e| Status::unavailable(format!("failed to decode created_at: {e}")))?;
-
+fn decode_user_without_password(row: &sqlx::postgres::PgRow) -> Result<User, sqlx::Error> {
     Ok(User {
-        id: id.to_string(),
-        username,
-        email,
-        created_at: naive_to_rfc3339(created_at),
+        id: row.try_get("id")?,
+        username: row.try_get("username")?,
+        email: row.try_get("email")?,
+        created_at: decode_created_at(row)?,
     })
+}
+
+fn is_unique_violation(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::Database(db_error) => db_error.code().as_deref() == Some("23505"),
+        _ => false,
+    }
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "service": "users-service"
+    }))
 }
 
 #[tonic::async_trait]
@@ -55,127 +92,140 @@ impl UsersService for UsersSvc {
     async fn create_user(
         &self,
         request: Request<CreateUserRequest>,
-    ) -> Result<Response<CreateUserResponse>, Status> {
-        let req = request.into_inner();
+    ) -> Result<Response<UserResponse>, Status> {
+        let request = request.into_inner();
 
-        if req.username.trim().is_empty()
-            || req.email.trim().is_empty()
-            || req.password.trim().is_empty()
-        {
-            return Err(Status::invalid_argument(
-                "username, email and password must not be empty",
-            ));
+        if request.username.trim().is_empty() {
+            return Err(Status::invalid_argument("username is required"));
         }
 
-        let user_id = Uuid::new_v4();
-        let created_at = Utc::now().naive_utc();
+        if request.email.trim().is_empty() {
+            return Err(Status::invalid_argument("email is required"));
+        }
 
-        let result = sqlx::query(
-            "INSERT INTO users (id, username, email, password, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+        if request.password.trim().is_empty() {
+            return Err(Status::invalid_argument("password is required"));
+        }
+
+        let id = Uuid::new_v4().to_string();
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO users (id, username, email, password)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, username, email, created_at
+            "#,
         )
-        .bind(user_id)
-        .bind(req.username.trim())
-        .bind(req.email.trim())
-        .bind(req.password)
-        .bind(created_at)
-        .execute(&self.pool)
-        .await;
+        .bind(&id)
+        .bind(request.username.trim())
+        .bind(request.email.trim())
+        .bind(request.password)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| {
+            if is_unique_violation(&err) {
+                Status::already_exists("email already exists")
+            } else {
+                error!(error = %err, "Failed to create user");
+                Status::unavailable("database error")
+            }
+        })?;
 
-        match result {
-            Ok(_) => {
-                info!(id = %user_id, email = %req.email, "User created");
-                Ok(Response::new(CreateUserResponse {
-                    user: Some(User {
-                        id: user_id.to_string(),
-                        username: req.username.trim().to_string(),
-                        email: req.email.trim().to_string(),
-                        created_at: naive_to_rfc3339(created_at),
-                    }),
-                }))
-            }
-            Err(sqlx::Error::Database(db_err)) => {
-                if db_err.code().as_deref() == Some("23505") {
-                    Err(Status::already_exists("email already exists"))
-                } else {
-                    Err(Status::unavailable(format!("database error: {db_err}")))
-                }
-            }
-            Err(e) => Err(Status::unavailable(format!("database error: {e}"))),
-        }
+        let user = decode_user_without_password(&row).map_err(|err| {
+            error!(error = %err, "Failed to decode created user row");
+            Status::unavailable("database decode error")
+        })?;
+
+        info!(id = %user.id, email = %user.email, "User created");
+
+        Ok(Response::new(UserResponse { user: Some(user) }))
     }
 
     async fn get_user(
         &self,
         request: Request<GetUserRequest>,
-    ) -> Result<Response<GetUserResponse>, Status> {
-        let req = request.into_inner();
+    ) -> Result<Response<UserResponse>, Status> {
+        let request = request.into_inner();
 
-        if req.id.trim().is_empty() {
-            return Err(Status::invalid_argument("id must not be empty"));
+        if request.id.trim().is_empty() {
+            return Err(Status::invalid_argument("id is required"));
         }
 
-        let user_id = Uuid::parse_str(req.id.trim())
-            .map_err(|_| Status::invalid_argument("id must be a valid UUID"))?;
+        let row = sqlx::query(
+            r#"
+            SELECT id, username, email, created_at
+            FROM users
+            WHERE id = $1
+            "#,
+        )
+        .bind(request.id.trim())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| {
+            error!(error = %err, "Failed to get user");
+            Status::unavailable("database error")
+        })?
+        .ok_or_else(|| Status::not_found("user not found"))?;
 
-        let row = sqlx::query("SELECT id, username, email, created_at FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
+        let user = decode_user_without_password(&row).map_err(|err| {
+            error!(error = %err, "Failed to decode user row");
+            Status::unavailable("database decode error")
+        })?;
 
-        let row = row.ok_or_else(|| Status::not_found("user not found"))?;
-        let user = decode_user_without_password(&row)?;
-
-        info!(id = %user.id, "User queried");
-
-        Ok(Response::new(GetUserResponse { user: Some(user) }))
+        Ok(Response::new(UserResponse { user: Some(user) }))
     }
 
     async fn login_basic(
         &self,
         request: Request<LoginBasicRequest>,
     ) -> Result<Response<LoginBasicResponse>, Status> {
-        let req = request.into_inner();
+        let request = request.into_inner();
 
-        if req.email.trim().is_empty() || req.password.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "email and password must not be empty",
-            ));
+        if request.email.trim().is_empty() {
+            return Err(Status::invalid_argument("email is required"));
         }
 
-        info!(email = %req.email, "Login attempt");
+        if request.password.trim().is_empty() {
+            return Err(Status::invalid_argument("password is required"));
+        }
+
+        info!(email = %request.email, "LoginBasic attempt");
 
         let row = sqlx::query(
-            "SELECT id, username, email, password, created_at
-             FROM users
-             WHERE email = $1",
+            r#"
+            SELECT id, username, email, password, created_at
+            FROM users
+            WHERE email = $1
+            "#,
         )
-        .bind(req.email.trim())
+        .bind(request.email.trim())
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
+        .map_err(|err| {
+            error!(error = %err, "Failed during LoginBasic lookup");
+            Status::unavailable("database error")
+        })?
+        .ok_or_else(|| {
+            warn!(email = %request.email, "LoginBasic user not found");
+            Status::unauthenticated("invalid credentials")
+        })?;
 
-        let row = match row {
-            Some(row) => row,
-            None => {
-                info!(email = %req.email, "Login failed: user not found");
-                return Err(Status::unauthenticated("invalid credentials"));
-            }
-        };
+        let stored_password: String = row.try_get("password").map_err(|err| {
+            error!(error = %err, "Failed to decode password column");
+            Status::unavailable("database decode error")
+        })?;
 
-        let saved_password: String = row
-            .try_get("password")
-            .map_err(|e| Status::unavailable(format!("failed to decode password: {e}")))?;
-
-        if saved_password != req.password {
-            info!(email = %req.email, "Login failed: password mismatch");
+        if stored_password != request.password {
+            warn!(email = %request.email, "LoginBasic password mismatch");
             return Err(Status::unauthenticated("invalid credentials"));
         }
 
-        let user = decode_user_without_password(&row)?;
+        let user = decode_user_without_password(&row).map_err(|err| {
+            error!(error = %err, "Failed to decode LoginBasic user row");
+            Status::unavailable("database decode error")
+        })?;
 
-        info!(email = %user.email, "Login success");
+        info!(id = %user.id, email = %user.email, "LoginBasic success");
 
         Ok(Response::new(LoginBasicResponse {
             success: true,
@@ -184,52 +234,58 @@ impl UsersService for UsersSvc {
     }
 }
 
-async fn init_db(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY,
-            username VARCHAR NOT NULL,
-            email VARCHAR NOT NULL UNIQUE,
-            password VARCHAR NOT NULL,
-            created_at TIMESTAMP NOT NULL
-        )",
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let addr = "0.0.0.0:50051".parse()?;
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50051".to_string());
+    let grpc_addr = format!("0.0.0.0:{grpc_port}").parse()?;
+
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@users-db:5432/users_db".to_string());
 
-    info!("Starting users-service on 0.0.0.0:50051");
+    info!("Starting users-service gRPC on {}", grpc_addr);
 
-    let pool = PgPool::connect(&database_url).await.map_err(|e| {
-        error!(error = %e, "Failed to connect to PostgreSQL");
-        e
+    let pool = PgPool::connect(&database_url).await.map_err(|err| {
+        error!(error = %err, "Failed to connect to PostgreSQL");
+        err
     })?;
 
     info!("Connected to PostgreSQL");
 
-    init_db(&pool).await.map_err(|e| {
-        error!(error = %e, "Failed creating users table");
-        e
+    init_db(&pool).await.map_err(|err| {
+        error!(error = %err, "Failed creating users table");
+        err
     })?;
 
     info!("Users table ready");
 
     let service = UsersSvc { pool };
 
-    Server::builder()
-        .add_service(UsersServiceServer::new(service))
-        .serve(addr)
-        .await?;
+    let grpc_server = async move {
+        Server::builder()
+            .add_service(UsersServiceServer::new(service))
+            .serve(grpc_addr)
+            .await
+            .map_err(anyhow::Error::from)
+    };
+
+    if let Ok(port) = env::var("PORT") {
+        let http_addr = format!("0.0.0.0:{port}").parse()?;
+        let app = Router::new().route("/health", get(health));
+
+        info!("Starting users-service HTTP health on {}", http_addr);
+
+        let http_server = async move {
+            let listener = TcpListener::bind(http_addr).await?;
+            axum::serve(listener, app).await?;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        tokio::try_join!(grpc_server, http_server)?;
+    } else {
+        grpc_server.await?;
+    }
 
     Ok(())
 }
