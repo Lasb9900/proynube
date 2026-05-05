@@ -21,6 +21,8 @@ services:
         value: game-room-service:50053
       - key: SCORE_SERVICE_ADDR
         value: score-service:50054
+      - key: LIVE_EVENTS_SERVICE_ADDR
+        value: live-events-service:50055
 
   - type: web
     name: users-service
@@ -30,8 +32,11 @@ services:
     dockerContext: services/users-service
     plan: free
     autoDeploy: true
+    healthCheckPath: /health
     envVars:
       - key: PORT
+        value: "18051"
+      - key: USERS_GRPC_PORT
         value: "50051"
       - key: DATABASE_URL
         fromDatabase:
@@ -46,8 +51,11 @@ services:
     dockerContext: services/questions-service
     plan: free
     autoDeploy: true
+    healthCheckPath: /health
     envVars:
       - key: PORT
+        value: "18052"
+      - key: QUESTIONS_GRPC_PORT
         value: "50052"
       - key: JIKAN_BASE_URL
         value: https://api.jikan.moe/v4
@@ -60,8 +68,11 @@ services:
     dockerContext: services/game-room-service
     plan: free
     autoDeploy: true
+    healthCheckPath: /health
     envVars:
       - key: PORT
+        value: "18053"
+      - key: GAME_ROOM_GRPC_PORT
         value: "50053"
       - key: DATABASE_URL
         fromDatabase:
@@ -78,14 +89,32 @@ services:
     dockerContext: services/score-service
     plan: free
     autoDeploy: true
+    healthCheckPath: /health
     envVars:
       - key: PORT
+        value: "18054"
+      - key: SCORE_GRPC_PORT
         value: "50054"
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: score-redis
           property: connectionString
+
+  - type: web
+    name: live-events-service
+    runtime: docker
+    rootDir: anime-quiz-arena-ucab
+    dockerfilePath: services/live-events-service/Dockerfile
+    dockerContext: services/live-events-service
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "18055"
+      - key: LIVE_EVENTS_GRPC_PORT
+        value: "50055"
 
   - type: keyvalue
     name: score-redis

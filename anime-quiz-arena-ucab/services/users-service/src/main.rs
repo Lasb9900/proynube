@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, net::SocketAddr};
 
 use axum::{routing::get, Json, Router};
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -15,7 +15,8 @@ pub mod users {
 
 use users::users_service_server::{UsersService, UsersServiceServer};
 use users::{
-    CreateUserRequest, GetUserRequest, LoginBasicRequest, LoginBasicResponse, User, UserResponse,
+    CreateUserRequest, CreateUserResponse, GetUserRequest, GetUserResponse, LoginBasicRequest,
+    LoginBasicResponse, User,
 };
 
 #[derive(Clone)]
@@ -92,7 +93,7 @@ impl UsersService for UsersSvc {
     async fn create_user(
         &self,
         request: Request<CreateUserRequest>,
-    ) -> Result<Response<UserResponse>, Status> {
+    ) -> Result<Response<CreateUserResponse>, Status> {
         let request = request.into_inner();
 
         if request.username.trim().is_empty() {
@@ -138,13 +139,13 @@ impl UsersService for UsersSvc {
 
         info!(id = %user.id, email = %user.email, "User created");
 
-        Ok(Response::new(UserResponse { user: Some(user) }))
+        Ok(Response::new(CreateUserResponse { user: Some(user) }))
     }
 
     async fn get_user(
         &self,
         request: Request<GetUserRequest>,
-    ) -> Result<Response<UserResponse>, Status> {
+    ) -> Result<Response<GetUserResponse>, Status> {
         let request = request.into_inner();
 
         if request.id.trim().is_empty() {
@@ -172,7 +173,7 @@ impl UsersService for UsersSvc {
             Status::unavailable("database decode error")
         })?;
 
-        Ok(Response::new(UserResponse { user: Some(user) }))
+        Ok(Response::new(GetUserResponse { user: Some(user) }))
     }
 
     async fn login_basic(
@@ -238,8 +239,14 @@ impl UsersService for UsersSvc {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50051".to_string());
-    let grpc_addr = format!("0.0.0.0:{grpc_port}").parse()?;
+    let grpc_port = env::var("USERS_GRPC_PORT")
+        .or_else(|_| env::var("GRPC_PORT"))
+        .unwrap_or_else(|_| "50051".to_string());
+
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
+
+    let http_port = env::var("PORT").unwrap_or_else(|_| "18051".to_string());
+    let http_addr: SocketAddr = format!("0.0.0.0:{http_port}").parse()?;
 
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@users-db:5432/users_db".to_string());
@@ -270,22 +277,18 @@ async fn main() -> anyhow::Result<()> {
             .map_err(anyhow::Error::from)
     };
 
-    if let Ok(port) = env::var("PORT") {
-        let http_addr = format!("0.0.0.0:{port}").parse()?;
+    let http_server = async move {
         let app = Router::new().route("/health", get(health));
 
         info!("Starting users-service HTTP health on {}", http_addr);
 
-        let http_server = async move {
-            let listener = TcpListener::bind(http_addr).await?;
-            axum::serve(listener, app).await?;
-            Ok::<(), anyhow::Error>(())
-        };
+        let listener = TcpListener::bind(http_addr).await?;
+        axum::serve(listener, app).await?;
 
-        tokio::try_join!(grpc_server, http_server)?;
-    } else {
-        grpc_server.await?;
-    }
+        Ok::<(), anyhow::Error>(())
+    };
+
+    tokio::try_join!(grpc_server, http_server)?;
 
     Ok(())
 }
