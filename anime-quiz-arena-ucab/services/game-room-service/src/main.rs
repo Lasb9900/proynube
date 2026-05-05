@@ -1,7 +1,10 @@
+use axum::{routing::get, Json, Router};
 use chrono::{NaiveDateTime, Utc};
+use serde_json::json;
 use sqlx::Error as SqlxError;
 use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
-use std::env;
+use std::{env, net::SocketAddr};
+use tokio::net::TcpListener;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -377,9 +380,17 @@ impl GameRoomService for GameRoomSvc {
         }))
     }
 }
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "service": "game-room-service"
+    }))
+}
+
+
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let database_url = env::var("DATABASE_URL")
@@ -388,11 +399,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let score_service_addr =
         env::var("SCORE_SERVICE_ADDR").unwrap_or_else(|_| "score-service:50054".to_string());
 
-    let port = env::var("PORT").unwrap_or_else(|_| "50053".to_string());
-    let addr = format!("0.0.0.0:{port}")
-        .parse::<std::net::SocketAddr>()?;
-
-    info!("Starting game-room-service on {}", addr);
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50053".to_string());
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
 
     let db = PgPoolOptions::new()
         .max_connections(10)
@@ -469,10 +477,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         score_service_addr,
     };
 
-    Server::builder()
-        .add_service(GameRoomServiceServer::new(service))
-        .serve(addr)
-        .await?;
+    info!("Starting game-room-service gRPC on {}", grpc_addr);
+
+    let grpc_server = async move {
+        Server::builder()
+            .add_service(GameRoomServiceServer::new(service))
+            .serve(grpc_addr)
+            .await
+            .map_err(anyhow::Error::from)
+    };
+
+    let port = env::var("PORT").unwrap_or_else(|_| "10000".to_string());
+    let http_addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+
+    let app = Router::new().route("/health", get(health));
+
+    info!("Starting game-room-service HTTP health on {}", http_addr);
+
+    let http_server = async move {
+        let listener = TcpListener::bind(http_addr).await?;
+        axum::serve(listener, app).await?;
+        Ok::<(), anyhow::Error>(())
+    };
+
+    tokio::try_join!(grpc_server, http_server)?;
 
     Ok(())
 }
