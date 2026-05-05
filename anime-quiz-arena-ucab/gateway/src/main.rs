@@ -52,7 +52,7 @@ struct AppState {
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiErrorResponse>)>;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ApiErrorResponse {
     error: String,
     code: String,
@@ -64,7 +64,7 @@ struct HealthResponse {
     service: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserDto {
     id: String,
@@ -73,12 +73,12 @@ struct UserDto {
     created_at: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct UserResponseDto {
     user: Option<UserDto>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoginResponseDto {
     success: bool,
@@ -156,14 +156,14 @@ struct LeaderboardResponseDto {
     entries: Vec<ScoreEntryDto>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct CreateUserBody {
     username: String,
     email: String,
     password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct LoginBody {
     email: String,
     password: String,
@@ -298,6 +298,11 @@ fn normalize_service_addr(addr: &str) -> String {
     }
 }
 
+fn service_http_url(addr: &str, path: &str) -> String {
+    let base = normalize_service_addr(addr);
+    format!("{}{}", base.trim_end_matches('/'), path)
+}
+
 fn map_grpc_error(status: Status) -> (StatusCode, Json<ApiErrorResponse>) {
     let http_status = match status.code() {
         Code::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -336,6 +341,42 @@ fn map_connect_error(err: tonic::transport::Error) -> (StatusCode, Json<ApiError
             code: "unavailable".to_string(),
         }),
     )
+}
+
+fn map_http_connect_error(err: reqwest::Error) -> (StatusCode, Json<ApiErrorResponse>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ApiErrorResponse {
+            error: format!("No se pudo conectar al users-service por HTTP: {err}"),
+            code: "unavailable".to_string(),
+        }),
+    )
+}
+
+fn map_http_decode_error(err: reqwest::Error) -> (StatusCode, Json<ApiErrorResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiErrorResponse {
+            error: format!("Respuesta inválida del users-service: {err}"),
+            code: "invalid_response".to_string(),
+        }),
+    )
+}
+
+async fn map_users_http_error(resp: reqwest::Response) -> (StatusCode, Json<ApiErrorResponse>) {
+    let status = StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+    match resp.json::<ApiErrorResponse>().await {
+        Ok(error) => (status, Json(error)),
+        Err(_) => (
+            status,
+            Json(ApiErrorResponse {
+                error: format!("users-service respondió con estado {status}"),
+                code: "users_service_error".to_string(),
+            }),
+        ),
+    }
 }
 
 impl GatewayServerImpl {
@@ -684,50 +725,52 @@ async fn create_user_http(
     State(state): State<AppState>,
     Json(body): Json<CreateUserBody>,
 ) -> ApiResult<UserResponseDto> {
-    let mut client = users::users_service_client::UsersServiceClient::connect(
-        normalize_service_addr(&state.users_addr),
-    )
-    .await
-    .map_err(map_connect_error)?;
+    let client = reqwest::Client::new();
+    let url = service_http_url(&state.users_addr, "/api/users");
 
     let response = client
-        .create_user(users::CreateUserRequest {
-            username: body.username,
-            email: body.email,
-            password: body.password,
-        })
+        .post(url)
+        .json(&body)
+        .send()
         .await
-        .map_err(map_grpc_error)?
-        .into_inner();
+        .map_err(map_http_connect_error)?;
 
-    Ok(Json(UserResponseDto {
-        user: response.user.map(UserDto::from),
-    }))
+    if !response.status().is_success() {
+        return Err(map_users_http_error(response).await);
+    }
+
+    let data = response
+        .json::<UserResponseDto>()
+        .await
+        .map_err(map_http_decode_error)?;
+
+    Ok(Json(data))
 }
 
 async fn login_http(
     State(state): State<AppState>,
     Json(body): Json<LoginBody>,
 ) -> ApiResult<LoginResponseDto> {
-    let mut client = users::users_service_client::UsersServiceClient::connect(
-        normalize_service_addr(&state.users_addr),
-    )
-    .await
-    .map_err(map_connect_error)?;
+    let client = reqwest::Client::new();
+    let url = service_http_url(&state.users_addr, "/api/login");
 
     let response = client
-        .login_basic(users::LoginBasicRequest {
-            email: body.email,
-            password: body.password,
-        })
+        .post(url)
+        .json(&body)
+        .send()
         .await
-        .map_err(map_grpc_error)?
-        .into_inner();
+        .map_err(map_http_connect_error)?;
 
-    Ok(Json(LoginResponseDto {
-        success: response.success,
-        user: response.user.map(UserDto::from),
-    }))
+    if !response.status().is_success() {
+        return Err(map_users_http_error(response).await);
+    }
+
+    let data = response
+        .json::<LoginResponseDto>()
+        .await
+        .map_err(map_http_decode_error)?;
+
+    Ok(Json(data))
 }
 
 async fn generate_question_http(
@@ -972,7 +1015,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let users_addr = env::var("USERS_SERVICE_ADDR")
-        .unwrap_or_else(|_| "users-service:50051".to_string());
+        .unwrap_or_else(|_| "http://localhost:50051".to_string());
 
     let questions_addr = env::var("QUESTIONS_SERVICE_ADDR")
         .unwrap_or_else(|_| "questions-service:50052".to_string());
