@@ -9,8 +9,6 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "8080"
       - key: GRPC_PORT
         value: "50050"
       - key: USERS_SERVICE_ADDR
@@ -34,8 +32,8 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "18051"
+      - key: GRPC_PORT
+        value: "50051"
       - key: USERS_GRPC_PORT
         value: "50051"
       - key: DATABASE_URL
@@ -53,10 +51,12 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "18052"
+      - key: GRPC_PORT
+        value: "50052"
       - key: QUESTIONS_GRPC_PORT
         value: "50052"
+      - key: QUESTIONS_SERVICE_ADDR
+        value: 0.0.0.0:50052
       - key: JIKAN_BASE_URL
         value: https://api.jikan.moe/v4
 
@@ -70,8 +70,8 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "18053"
+      - key: GRPC_PORT
+        value: "50053"
       - key: GAME_ROOM_GRPC_PORT
         value: "50053"
       - key: DATABASE_URL
@@ -91,8 +91,8 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "18054"
+      - key: GRPC_PORT
+        value: "50054"
       - key: SCORE_GRPC_PORT
         value: "50054"
       - key: REDIS_URL
@@ -111,8 +111,8 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "18055"
+      - key: GRPC_PORT
+        value: "50055"
       - key: LIVE_EVENTS_GRPC_PORT
         value: "50055"
 
@@ -134,7 +134,7 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://api-gateway.onrender.com
+        value: https://api-gateway-cwji.onrender.com
 
 databases:
   - name: users-db
