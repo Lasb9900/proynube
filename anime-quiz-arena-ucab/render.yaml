@@ -2,6 +2,7 @@ services:
   - type: web
     name: api-gateway
     runtime: docker
+    rootDir: anime-quiz-arena-ucab
     dockerfilePath: gateway/Dockerfile
     plan: free
     autoDeploy: true
@@ -20,35 +21,44 @@ services:
       - key: SCORE_SERVICE_ADDR
         value: score-service:50054
 
-  - type: pserv
+  - type: web
     name: users-service
     runtime: docker
+    rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/users-service/Dockerfile
     plan: free
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "50051"
       - key: DATABASE_URL
         fromDatabase:
           name: users-db
           property: connectionString
 
-  - type: pserv
+  - type: web
     name: questions-service
     runtime: docker
+    rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/questions-service/Dockerfile
     plan: free
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "50052"
       - key: JIKAN_BASE_URL
         value: https://api.jikan.moe/v4
 
-  - type: pserv
+  - type: web
     name: game-room-service
     runtime: docker
+    rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/game-room-service/Dockerfile
     plan: free
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "50053"
       - key: DATABASE_URL
         fromDatabase:
           name: rooms-db
@@ -56,13 +66,16 @@ services:
       - key: SCORE_SERVICE_ADDR
         value: score-service:50054
 
-  - type: pserv
+  - type: web
     name: score-service
     runtime: docker
+    rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/score-service/Dockerfile
     plan: free
     autoDeploy: true
     envVars:
+      - key: PORT
+        value: "50054"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -77,7 +90,7 @@ services:
   - type: web
     name: web
     runtime: static
-    rootDir: web
+    rootDir: anime-quiz-arena-ucab/web
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     pullRequestPreviewsEnabled: true
