@@ -4,6 +4,7 @@ services:
     runtime: docker
     rootDir: anime-quiz-arena-ucab
     dockerfilePath: gateway/Dockerfile
+    dockerContext: gateway
     plan: free
     autoDeploy: true
     healthCheckPath: /health
@@ -26,6 +27,7 @@ services:
     runtime: docker
     rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/users-service/Dockerfile
+    dockerContext: services/users-service
     plan: free
     autoDeploy: true
     envVars:
@@ -41,6 +43,7 @@ services:
     runtime: docker
     rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/questions-service/Dockerfile
+    dockerContext: services/questions-service
     plan: free
     autoDeploy: true
     envVars:
@@ -54,6 +57,7 @@ services:
     runtime: docker
     rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/game-room-service/Dockerfile
+    dockerContext: services/game-room-service
     plan: free
     autoDeploy: true
     envVars:
@@ -71,6 +75,7 @@ services:
     runtime: docker
     rootDir: anime-quiz-arena-ucab
     dockerfilePath: services/score-service/Dockerfile
+    dockerContext: services/score-service
     plan: free
     autoDeploy: true
     envVars:
