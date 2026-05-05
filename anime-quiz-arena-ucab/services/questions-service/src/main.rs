@@ -1,7 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use reqwest::Client;
-use serde::Deserialize;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,7 +9,13 @@ use tokio::sync::Mutex;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use axum::{routing::get, Json, Router};
+use serde::{Deserialize, Serialize};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
 use serde_json::json;
 use std::env;
 use std::net::SocketAddr;
@@ -73,6 +79,112 @@ struct JikanImages {
 #[derive(Deserialize)]
 struct JikanJpg {
     image_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchQuery {
+    q: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RoomIdBody {
+    room_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimeDto {
+    id: i32,
+    title: String,
+    synopsis: String,
+    episodes: i32,
+    score: f64,
+    image_url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchAnimeResponseDto {
+    animes: Vec<AnimeDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QuestionDto {
+    id: String,
+    text: String,
+    option_a: String,
+    option_b: String,
+    option_c: String,
+    option_d: String,
+    correct_option: String,
+    anime_id: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct GenerateQuestionResponseDto {
+    question: Option<QuestionDto>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiErrorResponse {
+    error: String,
+    code: String,
+}
+
+impl From<Anime> for AnimeDto {
+    fn from(anime: Anime) -> Self {
+        Self {
+            id: anime.id,
+            title: anime.title,
+            synopsis: anime.synopsis,
+            episodes: anime.episodes,
+            score: anime.score,
+            image_url: anime.image_url,
+        }
+    }
+}
+
+impl From<Question> for QuestionDto {
+    fn from(question: Question) -> Self {
+        Self {
+            id: question.id,
+            text: question.text,
+            option_a: question.option_a,
+            option_b: question.option_b,
+            option_c: question.option_c,
+            option_d: question.option_d,
+            correct_option: question.correct_option,
+            anime_id: question.anime_id,
+        }
+    }
+}
+
+type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiErrorResponse>)>;
+
+fn map_status_to_http(status: Status) -> (StatusCode, Json<ApiErrorResponse>) {
+    let http_status = match status.code() {
+        tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+        tonic::Code::NotFound => StatusCode::NOT_FOUND,
+        tonic::Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        tonic::Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    let code = match status.code() {
+        tonic::Code::InvalidArgument => "invalid_argument",
+        tonic::Code::NotFound => "not_found",
+        tonic::Code::Unavailable => "unavailable",
+        tonic::Code::Internal => "internal",
+        _ => "unknown",
+    };
+
+    (
+        http_status,
+        Json(ApiErrorResponse {
+            error: status.message().to_string(),
+            code: code.to_string(),
+        }),
+    )
 }
 
 impl JikanAdapter {
@@ -1038,16 +1150,101 @@ async fn health() -> Json<serde_json::Value> {
     }))
 }
 
+async fn search_anime_http(
+    State(service): State<QuestionsSvc>,
+    Query(query): Query<SearchQuery>,
+) -> ApiResult<SearchAnimeResponseDto> {
+    if query.q.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiErrorResponse {
+                error: "query must not be empty".to_string(),
+                code: "invalid_argument".to_string(),
+            }),
+        ));
+    }
+
+    let animes = service
+        .adapter
+        .search_anime(&query.q)
+        .await
+        .map_err(map_status_to_http)?;
+
+    Ok(Json(SearchAnimeResponseDto {
+        animes: animes.into_iter().map(AnimeDto::from).collect(),
+    }))
+}
+
+async fn generate_question_http(
+    State(service): State<QuestionsSvc>,
+    Json(body): Json<RoomIdBody>,
+) -> ApiResult<GenerateQuestionResponseDto> {
+    let room_id = if body.room_id.trim().is_empty() {
+        "global-demo-room".to_string()
+    } else {
+        body.room_id
+    };
+
+    let use_curated = rand::thread_rng().gen_bool(0.75);
+
+    if use_curated {
+        if let Some((question, _index)) =
+            generate_curated_question(&room_id, &service.recent_curated_by_room).await
+        {
+            return Ok(Json(GenerateQuestionResponseDto {
+                question: Some(QuestionDto::from(question)),
+            }));
+        }
+    }
+
+    let question = match service.adapter.fetch_top_anime().await {
+        Ok(mut animes) if animes.len() >= 4 => {
+            animes.shuffle(&mut rand::thread_rng());
+
+            let options = &animes[..4];
+            let correct = &options[0];
+
+            build_varied_question(options).unwrap_or_else(|| {
+                let correct_index = options
+                    .iter()
+                    .position(|anime| anime.id == correct.id)
+                    .unwrap_or(0);
+
+                Question {
+                    id: Uuid::new_v4().to_string(),
+                    text: "Cual de estos titulos corresponde a un anime real?".to_string(),
+                    option_a: options[0].title.clone(),
+                    option_b: options[1].title.clone(),
+                    option_c: options[2].title.clone(),
+                    option_d: options[3].title.clone(),
+                    correct_option: ANSWER_LABELS[correct_index].to_string(),
+                    anime_id: correct.id,
+                }
+            })
+        }
+        _ => generate_curated_question(&room_id, &service.recent_curated_by_room)
+            .await
+            .map(|(question, _)| question)
+            .unwrap_or_else(fallback_question),
+    };
+
+    Ok(Json(GenerateQuestionResponseDto {
+        question: Some(QuestionDto::from(question)),
+    }))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let grpc_addr: SocketAddr = env::var("QUESTIONS_SERVICE_ADDR")
-        .unwrap_or_else(|_| {
-            let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50052".to_string());
-            format!("0.0.0.0:{grpc_port}")
-        })
-        .parse()?;
+    let grpc_port = env::var("QUESTIONS_GRPC_PORT")
+        .or_else(|_| env::var("GRPC_PORT"))
+        .unwrap_or_else(|_| "50052".to_string());
+
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
+
+    let http_port = env::var("PORT").unwrap_or_else(|_| "18052".to_string());
+    let http_addr: SocketAddr = format!("0.0.0.0:{http_port}").parse()?;
 
     let jikan_base_url =
         env::var("JIKAN_BASE_URL").unwrap_or_else(|_| "https://api.jikan.moe/v4".to_string());
@@ -1075,37 +1272,40 @@ async fn main() -> anyhow::Result<()> {
 
     info!(
         %grpc_addr,
+        %http_addr,
         %jikan_base_url,
         http_timeout_secs,
         breaker_cooldown_secs,
-        "Starting questions-service gRPC"
+        "Starting questions-service"
     );
+
+    let grpc_service = svc.clone();
+    let http_service = svc.clone();
 
     let grpc_server = async move {
         Server::builder()
-            .add_service(QuestionsServiceServer::new(svc))
+            .add_service(QuestionsServiceServer::new(grpc_service))
             .serve(grpc_addr)
             .await
             .map_err(anyhow::Error::from)
     };
 
-    if let Ok(port) = env::var("PORT") {
-        let http_addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+    let http_server = async move {
+        let app = Router::new()
+            .route("/health", get(health))
+            .route("/api/anime/search", get(search_anime_http))
+            .route("/api/questions/generate", post(generate_question_http))
+            .with_state(http_service);
 
-        let app = Router::new().route("/health", get(health));
+        info!("Starting questions-service HTTP on {}", http_addr);
 
-        info!("Starting questions-service HTTP health on {}", http_addr);
+        let listener = TcpListener::bind(http_addr).await?;
+        axum::serve(listener, app).await?;
 
-        let http_server = async move {
-            let listener = TcpListener::bind(http_addr).await?;
-            axum::serve(listener, app).await?;
-            Ok::<(), anyhow::Error>(())
-        };
+        Ok::<(), anyhow::Error>(())
+    };
 
-        tokio::try_join!(grpc_server, http_server)?;
-    } else {
-        grpc_server.await?;
-    }
+    tokio::try_join!(grpc_server, http_server)?;
 
     Ok(())
 }
