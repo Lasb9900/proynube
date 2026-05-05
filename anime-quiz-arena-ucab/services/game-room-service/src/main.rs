@@ -45,6 +45,14 @@ struct RoomPlayerRow {
     joined_at: NaiveDateTime,
 }
 
+fn normalize_service_addr(addr: &str) -> String {
+    if addr.starts_with("http://") || addr.starts_with("https://") {
+        addr.to_string()
+    } else {
+        format!("http://{}", addr)
+    }
+}
+
 impl GameRoomSvc {
     fn parse_uuid(value: &str, field: &str) -> Result<Uuid, Status> {
         if value.trim().is_empty() {
@@ -52,6 +60,7 @@ impl GameRoomSvc {
                 "{field} must not be empty"
             )));
         }
+
         Uuid::parse_str(value)
             .map_err(|_| Status::invalid_argument(format!("{field} must be a valid UUID")))
     }
@@ -62,6 +71,7 @@ impl GameRoomSvc {
                 "{field} must not be empty"
             )));
         }
+
         Ok(())
     }
 
@@ -94,6 +104,7 @@ impl GameRoomService for GameRoomSvc {
         request: Request<CreateRoomRequest>,
     ) -> Result<Response<CreateRoomResponse>, Status> {
         let payload = request.into_inner();
+
         Self::ensure_non_empty(&payload.name, "name")?;
         let created_by = Self::parse_uuid(&payload.created_by, "created_by")?;
 
@@ -101,7 +112,8 @@ impl GameRoomService for GameRoomSvc {
         let now = Utc::now().naive_utc();
 
         sqlx::query(
-            "INSERT INTO rooms (id, name, status, created_by, created_at) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO rooms (id, name, status, created_by, created_at)
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(room_id)
         .bind(payload.name.trim())
@@ -115,6 +127,7 @@ impl GameRoomService for GameRoomSvc {
         info!(room_id = %room_id, created_by = %created_by, "Room created");
 
         let room = self.get_room(room_id).await?;
+
         Ok(Response::new(CreateRoomResponse {
             room: Some(Self::to_proto_room(room)),
         }))
@@ -125,10 +138,12 @@ impl GameRoomService for GameRoomSvc {
         request: Request<JoinRoomRequest>,
     ) -> Result<Response<JoinRoomResponse>, Status> {
         let payload = request.into_inner();
+
         let room_id = Self::parse_uuid(&payload.room_id, "room_id")?;
         let user_id = Self::parse_uuid(&payload.user_id, "user_id")?;
 
         let room = self.get_room(room_id).await?;
+
         if room.status == "FINISHED" {
             return Err(Status::failed_precondition("room is finished"));
         }
@@ -141,7 +156,15 @@ impl GameRoomService for GameRoomSvc {
         };
 
         sqlx::query(
-            "INSERT INTO room_players (room_id, user_id, username, joined_at, ready) VALUES ($1, $2, $3, $4, true) ON CONFLICT (room_id, user_id) DO UPDATE SET username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username ELSE room_players.username END, ready = true",
+            "INSERT INTO room_players (room_id, user_id, username, joined_at, ready)
+             VALUES ($1, $2, $3, $4, true)
+             ON CONFLICT (room_id, user_id)
+             DO UPDATE SET
+                username = CASE
+                    WHEN EXCLUDED.username <> '' THEN EXCLUDED.username
+                    ELSE room_players.username
+                END,
+                ready = true",
         )
         .bind(room_id)
         .bind(user_id)
@@ -163,6 +186,7 @@ impl GameRoomService for GameRoomSvc {
         request: Request<StartGameRequest>,
     ) -> Result<Response<StartGameResponse>, Status> {
         let room_id = Self::parse_uuid(&request.into_inner().room_id, "room_id")?;
+
         self.get_room(room_id).await?;
 
         sqlx::query("UPDATE rooms SET status = 'STARTED' WHERE id = $1")
@@ -174,6 +198,7 @@ impl GameRoomService for GameRoomSvc {
         info!(room_id = %room_id, "Game started");
 
         let room = self.get_room(room_id).await?;
+
         Ok(Response::new(StartGameResponse {
             room: Some(Self::to_proto_room(room)),
         }))
@@ -184,6 +209,7 @@ impl GameRoomService for GameRoomSvc {
         request: Request<EndGameRequest>,
     ) -> Result<Response<EndGameResponse>, Status> {
         let room_id = Self::parse_uuid(&request.into_inner().room_id, "room_id")?;
+
         self.get_room(room_id).await?;
 
         sqlx::query("UPDATE rooms SET status = 'FINISHED' WHERE id = $1")
@@ -195,6 +221,7 @@ impl GameRoomService for GameRoomSvc {
         info!(room_id = %room_id, "Game ended");
 
         let room = self.get_room(room_id).await?;
+
         Ok(Response::new(EndGameResponse {
             room: Some(Self::to_proto_room(room)),
         }))
@@ -205,23 +232,26 @@ impl GameRoomService for GameRoomSvc {
         request: Request<SubmitAnswerRequest>,
     ) -> Result<Response<SubmitAnswerResponse>, Status> {
         let payload = request.into_inner();
+
         let room_id = Self::parse_uuid(&payload.room_id, "room_id")?;
         let user_id = Self::parse_uuid(&payload.user_id, "user_id")?;
+
         Self::ensure_non_empty(&payload.selected_option, "selected_option")?;
         Self::ensure_non_empty(&payload.correct_option, "correct_option")?;
         Self::ensure_non_empty(&payload.question_id, "question_id")?;
 
         let room = self.get_room(room_id).await?;
+
         if room.status != "STARTED" {
             return Err(Status::failed_precondition("room is not started"));
         }
 
         let joined: bool = sqlx::query_scalar(
             "SELECT EXISTS(
-        SELECT 1
-        FROM room_players
-        WHERE room_id = $1 AND user_id = $2
-    )",
+                SELECT 1
+                FROM room_players
+                WHERE room_id = $1 AND user_id = $2
+            )",
         )
         .bind(room_id)
         .bind(user_id)
@@ -235,15 +265,25 @@ impl GameRoomService for GameRoomSvc {
 
         let is_correct = payload.selected_option.trim() == payload.correct_option.trim();
 
-        let inserted = sqlx::query("INSERT INTO room_answers (room_id, question_id, user_id, selected_option, correct_option, is_correct) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(room_id)
-            .bind(payload.question_id.trim())
-            .bind(user_id)
-            .bind(payload.selected_option.trim())
-            .bind(payload.correct_option.trim())
-            .bind(is_correct)
-            .execute(&self.db)
-            .await;
+        let inserted = sqlx::query(
+            "INSERT INTO room_answers (
+                room_id,
+                question_id,
+                user_id,
+                selected_option,
+                correct_option,
+                is_correct
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(room_id)
+        .bind(payload.question_id.trim())
+        .bind(user_id)
+        .bind(payload.selected_option.trim())
+        .bind(payload.correct_option.trim())
+        .bind(is_correct)
+        .execute(&self.db)
+        .await;
 
         if let Err(e) = inserted {
             if let SqlxError::Database(db_err) = &e {
@@ -253,9 +293,17 @@ impl GameRoomService for GameRoomSvc {
                     ));
                 }
             }
+
             return Err(Status::unavailable(format!("database error: {e}")));
         }
-        info!(room_id = %room_id, user_id = %user_id, question_id = %payload.question_id, correct = is_correct, "Answer submitted");
+
+        info!(
+            room_id = %room_id,
+            user_id = %user_id,
+            question_id = %payload.question_id,
+            correct = is_correct,
+            "Answer submitted"
+        );
 
         if !is_correct {
             return Ok(Response::new(SubmitAnswerResponse {
@@ -266,15 +314,17 @@ impl GameRoomService for GameRoomSvc {
             }));
         }
 
-        let mut client = match ScoreServiceClient::connect(format!(
-            "http://{}",
-            self.score_service_addr
-        ))
-        .await
-        {
+        let score_url = normalize_service_addr(&self.score_service_addr);
+
+        let mut client = match ScoreServiceClient::connect(score_url.clone()).await {
             Ok(client) => client,
             Err(e) => {
-                error!(error = %e, "Failed to connect to score-service");
+                error!(
+                    error = %e,
+                    score_service_addr = %score_url,
+                    "Failed to connect to score-service"
+                );
+
                 return Ok(Response::new(SubmitAnswerResponse {
                     correct: true,
                     points_awarded: 100,
@@ -294,7 +344,14 @@ impl GameRoomService for GameRoomSvc {
         {
             Ok(resp) => {
                 let total_points = resp.into_inner().total_points;
-                info!(room_id = %room_id, user_id = %user_id, total_points = total_points, "Score updated");
+
+                info!(
+                    room_id = %room_id,
+                    user_id = %user_id,
+                    total_points = total_points,
+                    "Score updated"
+                );
+
                 Ok(Response::new(SubmitAnswerResponse {
                     correct: true,
                     points_awarded: 100,
@@ -304,6 +361,7 @@ impl GameRoomService for GameRoomSvc {
             }
             Err(e) => {
                 error!(error = %e, "Score-service failed on AddScore");
+
                 Ok(Response::new(SubmitAnswerResponse {
                     correct: true,
                     points_awarded: 100,
@@ -319,13 +377,18 @@ impl GameRoomService for GameRoomSvc {
         request: Request<GetRoomStateRequest>,
     ) -> Result<Response<GetRoomStateResponse>, Status> {
         let payload = request.into_inner();
+
         let room_id = Self::parse_uuid(&payload.room_id, "room_id")?;
         let room = self.get_room(room_id).await?;
+
         let current_q = payload.current_question_id.trim().to_string();
         let has_question = !current_q.is_empty();
 
         let player_rows = sqlx::query_as::<_, RoomPlayerRow>(
-            "SELECT user_id, username, ready, joined_at FROM room_players WHERE room_id = $1 ORDER BY joined_at ASC",
+            "SELECT user_id, username, ready, joined_at
+             FROM room_players
+             WHERE room_id = $1
+             ORDER BY joined_at ASC",
         )
         .bind(room_id)
         .fetch_all(&self.db)
@@ -333,34 +396,52 @@ impl GameRoomService for GameRoomSvc {
         .map_err(|e| Status::unavailable(format!("database error: {e}")))?;
 
         let total_players = player_rows.len() as i32;
+
         let answered_count = if has_question {
             sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM room_answers WHERE room_id = $1 AND question_id = $2",
+                "SELECT COUNT(*)
+                 FROM room_answers
+                 WHERE room_id = $1 AND question_id = $2",
             )
             .bind(room_id)
             .bind(&current_q)
             .fetch_one(&self.db)
             .await
-            .map_err(|e| Status::unavailable(format!("database error: {e}")))? as i32
+            .map_err(|e| Status::unavailable(format!("database error: {e}")))?
+                as i32
         } else {
             0
         };
 
         let mut players = Vec::with_capacity(player_rows.len());
+
         for player in player_rows {
             let answered_current_question = if has_question {
-                sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM room_answers WHERE room_id = $1 AND question_id = $2 AND user_id = $3)")
-                    .bind(room_id)
-                    .bind(&current_q)
-                    .bind(player.user_id)
-                    .fetch_one(&self.db)
-                    .await
-                    .map_err(|e| Status::unavailable(format!("database error: {e}")))?
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(
+                        SELECT 1
+                        FROM room_answers
+                        WHERE room_id = $1 AND question_id = $2 AND user_id = $3
+                    )",
+                )
+                .bind(room_id)
+                .bind(&current_q)
+                .bind(player.user_id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(|e| Status::unavailable(format!("database error: {e}")))?
             } else {
                 false
             };
+
             let fallback_username: String = player.user_id.to_string().chars().take(8).collect();
-            let username = if player.username.trim().is_empty() { fallback_username } else { player.username };
+
+            let username = if player.username.trim().is_empty() {
+                fallback_username
+            } else {
+                player.username
+            };
+
             players.push(RoomPlayer {
                 user_id: player.user_id.to_string(),
                 username,
@@ -371,6 +452,7 @@ impl GameRoomService for GameRoomSvc {
         }
 
         let all_answered = has_question && total_players > 0 && answered_count == total_players;
+
         Ok(Response::new(GetRoomStateResponse {
             room: Some(Self::to_proto_room(room)),
             players,
@@ -380,14 +462,13 @@ impl GameRoomService for GameRoomSvc {
         }))
     }
 }
+
 async fn health() -> Json<serde_json::Value> {
     Json(json!({
         "status": "ok",
         "service": "game-room-service"
     }))
 }
-
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -399,7 +480,10 @@ async fn main() -> anyhow::Result<()> {
     let score_service_addr =
         env::var("SCORE_SERVICE_ADDR").unwrap_or_else(|_| "score-service:50054".to_string());
 
-    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50053".to_string());
+    let grpc_port = env::var("GRPC_PORT")
+        .or_else(|_| env::var("GAME_ROOM_GRPC_PORT"))
+        .unwrap_or_else(|_| "50053".to_string());
+
     let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
 
     let db = PgPoolOptions::new()
@@ -435,21 +519,21 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     sqlx::query(
-        "ALTER TABLE room_players 
+        "ALTER TABLE room_players
          ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''",
     )
     .execute(&db)
     .await?;
 
     sqlx::query(
-        "ALTER TABLE room_players 
+        "ALTER TABLE room_players
          ADD COLUMN IF NOT EXISTS joined_at TIMESTAMP NOT NULL DEFAULT NOW()",
     )
     .execute(&db)
     .await?;
 
     sqlx::query(
-        "ALTER TABLE room_players 
+        "ALTER TABLE room_players
          ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT true",
     )
     .execute(&db)
@@ -474,9 +558,10 @@ async fn main() -> anyhow::Result<()> {
 
     let service = GameRoomSvc {
         db,
-        score_service_addr,
+        score_service_addr: score_service_addr.clone(),
     };
 
+    info!("Score service addr: {}", normalize_service_addr(&score_service_addr));
     info!("Starting game-room-service gRPC on {}", grpc_addr);
 
     let grpc_server = async move {

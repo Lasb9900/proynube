@@ -12,15 +12,15 @@ services:
       - key: GRPC_PORT
         value: "50050"
       - key: USERS_SERVICE_ADDR
-        value: users-service:50051
+        value: https://users-service-5iow.onrender.com
       - key: QUESTIONS_SERVICE_ADDR
-        value: questions-service:50052
+        value: https://questions-service-mten.onrender.com
       - key: GAME_ROOM_SERVICE_ADDR
-        value: game-room-service:50053
+        value: https://game-room-service.onrender.com
       - key: SCORE_SERVICE_ADDR
-        value: score-service:50054
+        value: https://score-service-lk5b.onrender.com
       - key: LIVE_EVENTS_SERVICE_ADDR
-        value: live-events-service:50055
+        value: https://live-events-service.onrender.com
 
   - type: web
     name: users-service
@@ -79,7 +79,7 @@ services:
           name: rooms-db
           property: connectionString
       - key: SCORE_SERVICE_ADDR
-        value: score-service:50054
+        value: https://score-service-lk5b.onrender.com
 
   - type: web
     name: score-service
