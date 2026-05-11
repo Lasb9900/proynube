@@ -11,11 +11,13 @@ services:
       - QUESTIONS_SERVICE_ADDR=questions-service:50052
       - GAME_ROOM_SERVICE_ADDR=game-room-service:50053
       - SCORE_SERVICE_ADDR=score-service:50054
+      - LIVE_EVENTS_SERVICE_ADDR=live-events-service:50055
     depends_on:
       - users-service
       - questions-service
       - game-room-service
       - score-service
+      - live-events-service
 
   users-service:
     build: ./services/users-service
@@ -66,6 +68,8 @@ services:
       - POSTGRES_DB=users_db
     ports:
       - "5433:5432"
+    volumes:
+      - users-db-data:/var/lib/postgresql/data
 
   rooms-db:
     image: postgres:16
@@ -75,8 +79,17 @@ services:
       - POSTGRES_DB=rooms_db
     ports:
       - "5434:5432"
+    volumes:
+      - rooms-db-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  users-db-data:
+  rooms-db-data:
+  redis-data:
