@@ -766,18 +766,16 @@ impl QuestionsService for QuestionsSvc {
 
         info!(room_id = %room_id, force_new, "GenerateQuestion request received");
 
-        if !force_new {
-            if let Some(existing_question) = self.get_existing_question_for_room(&room_id).await {
-                info!(room_id = %room_id, force_new, question_id = %existing_question.id, "returning existing question for room");
-                return Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(existing_question),
-                }));
-            }
+        if let Some(existing_question) = self.get_existing_question_for_room(&room_id).await {
+            info!(room_id = %room_id, question_id = %existing_question.id, "returning existing question for room");
+            return Ok(Response::new(GenerateQuestionResponse {
+                question: Some(existing_question),
+            }));
         }
 
         let question = self.generate_new_question_for_room(&room_id).await?;
         self.store_question_for_room(&room_id, &question).await;
-        info!(room_id = %room_id, force_new, question_id = %question.id, "generated new question for room");
+        info!(room_id = %room_id, question_id = %question.id, "generated new question for room");
 
         Ok(Response::new(GenerateQuestionResponse {
             question: Some(question),
