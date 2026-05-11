@@ -7,6 +7,8 @@ services:
       - "50050:50050"
       - "8080:8080"
     environment:
+      - PORT=8080
+      - GRPC_PORT=50050
       - USERS_SERVICE_ADDR=users-service:50051
       - QUESTIONS_SERVICE_ADDR=questions-service:50052
       - GAME_ROOM_SERVICE_ADDR=game-room-service:50053
@@ -24,6 +26,7 @@ services:
     ports:
       - "50051:50051"
     environment:
+      - GRPC_PORT=50051
       - DATABASE_URL=postgres://postgres:postgres@users-db:5432/users_db
     depends_on:
       - users-db
@@ -33,6 +36,7 @@ services:
     ports:
       - "50052:50052"
     environment:
+      - GRPC_PORT=50052
       - JIKAN_BASE_URL=https://api.jikan.moe/v4
 
   game-room-service:
@@ -40,6 +44,7 @@ services:
     ports:
       - "50053:50053"
     environment:
+      - GRPC_PORT=50053
       - DATABASE_URL=postgres://postgres:postgres@rooms-db:5432/rooms_db
       - SCORE_SERVICE_ADDR=score-service:50054
     depends_on:
@@ -51,6 +56,7 @@ services:
     ports:
       - "50054:50054"
     environment:
+      - GRPC_PORT=50054
       - REDIS_URL=redis://redis:6379
     depends_on:
       - redis
@@ -59,6 +65,8 @@ services:
     build: ./services/live-events-service
     ports:
       - "50055:50055"
+    environment:
+      - GRPC_PORT=50055
 
   users-db:
     image: postgres:16

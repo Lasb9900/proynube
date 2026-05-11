@@ -18,15 +18,19 @@ use tracing::info;
 pub mod gateway {
     tonic::include_proto!("animequiz.gateway.v1");
 }
+
 pub mod users {
     tonic::include_proto!("animequiz.users.v1");
 }
+
 pub mod questions {
     tonic::include_proto!("animequiz.questions.v1");
 }
+
 pub mod gameroom {
     tonic::include_proto!("animequiz.gameroom.v1");
 }
+
 pub mod score {
     tonic::include_proto!("animequiz.score.v1");
 }
@@ -203,6 +207,7 @@ struct SearchQuery {
 struct LeaderboardQuery {
     limit: Option<i32>,
 }
+
 #[derive(Debug, Deserialize)]
 struct RoomStateQuery {
     question_id: Option<String>,
@@ -217,6 +222,7 @@ struct RoomPlayerDto {
     ready: bool,
     joined_at: String,
 }
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RoomStateResponseDto {
@@ -288,6 +294,14 @@ impl From<score::ScoreEntry> for ScoreEntryDto {
     }
 }
 
+fn normalize_service_addr(addr: &str) -> String {
+    if addr.starts_with("http://") || addr.starts_with("https://") {
+        addr.to_string()
+    } else {
+        format!("http://{}", addr)
+    }
+}
+
 fn map_grpc_error(status: Status) -> (StatusCode, Json<ApiErrorResponse>) {
     let http_status = match status.code() {
         Code::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -299,21 +313,22 @@ fn map_grpc_error(status: Status) -> (StatusCode, Json<ApiErrorResponse>) {
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
+    let code = match status.code() {
+        Code::InvalidArgument => "invalid_argument",
+        Code::Unauthenticated => "unauthenticated",
+        Code::NotFound => "not_found",
+        Code::AlreadyExists => "already_exists",
+        Code::FailedPrecondition => "failed_precondition",
+        Code::Unavailable => "unavailable",
+        Code::Internal => "internal",
+        _ => "unknown",
+    };
+
     (
         http_status,
         Json(ApiErrorResponse {
             error: status.message().to_string(),
-            code: match status.code() {
-                Code::InvalidArgument => "invalid_argument",
-                Code::Unauthenticated => "unauthenticated",
-                Code::NotFound => "not_found",
-                Code::AlreadyExists => "already_exists",
-                Code::FailedPrecondition => "failed_precondition",
-                Code::Unavailable => "unavailable",
-                Code::Internal => "internal",
-                _ => "unknown",
-            }
-            .to_string(),
+            code: code.to_string(),
         }),
     )
 }
@@ -332,9 +347,8 @@ impl GatewayServerImpl {
     async fn users_client(
         &self,
     ) -> Result<users::users_service_client::UsersServiceClient<Channel>, Status> {
-        users::users_service_client::UsersServiceClient::connect(format!(
-            "http://{}",
-            self.users_addr
+        users::users_service_client::UsersServiceClient::connect(normalize_service_addr(
+            &self.users_addr,
         ))
         .await
         .map_err(|_| Status::unavailable("users-service no disponible"))
@@ -343,9 +357,8 @@ impl GatewayServerImpl {
     async fn questions_client(
         &self,
     ) -> Result<questions::questions_service_client::QuestionsServiceClient<Channel>, Status> {
-        questions::questions_service_client::QuestionsServiceClient::connect(format!(
-            "http://{}",
-            self.questions_addr
+        questions::questions_service_client::QuestionsServiceClient::connect(normalize_service_addr(
+            &self.questions_addr,
         ))
         .await
         .map_err(|_| Status::unavailable("questions-service no disponible"))
@@ -354,9 +367,8 @@ impl GatewayServerImpl {
     async fn game_room_client(
         &self,
     ) -> Result<gameroom::game_room_service_client::GameRoomServiceClient<Channel>, Status> {
-        gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-            "http://{}",
-            self.game_room_addr
+        gameroom::game_room_service_client::GameRoomServiceClient::connect(normalize_service_addr(
+            &self.game_room_addr,
         ))
         .await
         .map_err(|_| Status::unavailable("game-room-service no disponible"))
@@ -365,9 +377,8 @@ impl GatewayServerImpl {
     async fn score_client(
         &self,
     ) -> Result<score::score_service_client::ScoreServiceClient<Channel>, Status> {
-        score::score_service_client::ScoreServiceClient::connect(format!(
-            "http://{}",
-            self.score_addr
+        score::score_service_client::ScoreServiceClient::connect(normalize_service_addr(
+            &self.score_addr,
         ))
         .await
         .map_err(|_| Status::unavailable("score-service no disponible"))
@@ -382,6 +393,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayUserResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.users_client().await?;
+
         let r = c
             .create_user(users::CreateUserRequest {
                 username: p.username,
@@ -408,6 +420,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayLoginResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.users_client().await?;
+
         let r = c
             .login_basic(users::LoginBasicRequest {
                 email: p.email,
@@ -434,6 +447,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewaySearchAnimeResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.questions_client().await?;
+
         let r = c
             .search_anime(questions::SearchAnimeRequest { query: p.query })
             .await
@@ -462,6 +476,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayGenerateQuestionResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.questions_client().await?;
+
         let r = c
             .generate_question(questions::GenerateQuestionRequest { room_id: p.room_id })
             .await
@@ -488,6 +503,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayRoomResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .create_room(gameroom::CreateRoomRequest {
                 name: p.name,
@@ -508,6 +524,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayRoomResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .join_room(gameroom::JoinRoomRequest {
                 room_id: p.room_id,
@@ -529,6 +546,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayRoomResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .start_game(gameroom::StartGameRequest { room_id: p.room_id })
             .await
@@ -546,6 +564,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayRoomResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .end_game(gameroom::EndGameRequest { room_id: p.room_id })
             .await
@@ -563,6 +582,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewaySubmitAnswerResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .submit_answer(gameroom::SubmitAnswerRequest {
                 room_id: p.room_id,
@@ -589,6 +609,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayLeaderboardResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.score_client().await?;
+
         let r = c
             .get_leaderboard(score::GetLeaderboardRequest {
                 room_id: p.room_id,
@@ -617,6 +638,7 @@ impl GatewayService for GatewayServerImpl {
     ) -> Result<Response<GatewayRoomStateResponse>, Status> {
         let p = request.into_inner();
         let mut c = self.game_room_client().await?;
+
         let r = c
             .get_room_state(gameroom::GetRoomStateRequest {
                 room_id: p.room_id,
@@ -625,6 +647,7 @@ impl GatewayService for GatewayServerImpl {
             .await
             .map_err(|e| Status::new(e.code(), e.message().to_string()))?
             .into_inner();
+
         Ok(Response::new(GatewayRoomStateResponse {
             room: r.room.map(map_room),
             players: r
@@ -666,10 +689,9 @@ async fn create_user_http(
     State(state): State<AppState>,
     Json(body): Json<CreateUserBody>,
 ) -> ApiResult<UserResponseDto> {
-    let mut client = users::users_service_client::UsersServiceClient::connect(format!(
-        "http://{}",
-        state.users_addr
-    ))
+    let mut client = users::users_service_client::UsersServiceClient::connect(
+        normalize_service_addr(&state.users_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -692,10 +714,9 @@ async fn login_http(
     State(state): State<AppState>,
     Json(body): Json<LoginBody>,
 ) -> ApiResult<LoginResponseDto> {
-    let mut client = users::users_service_client::UsersServiceClient::connect(format!(
-        "http://{}",
-        state.users_addr
-    ))
+    let mut client = users::users_service_client::UsersServiceClient::connect(
+        normalize_service_addr(&state.users_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -718,10 +739,9 @@ async fn generate_question_http(
     State(state): State<AppState>,
     Json(body): Json<RoomIdBody>,
 ) -> ApiResult<GenerateQuestionResponseDto> {
-    let mut client = questions::questions_service_client::QuestionsServiceClient::connect(format!(
-        "http://{}",
-        state.questions_addr
-    ))
+    let mut client = questions::questions_service_client::QuestionsServiceClient::connect(
+        normalize_service_addr(&state.questions_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -742,10 +762,9 @@ async fn search_anime_http(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<SearchAnimeResponseDto> {
-    let mut client = questions::questions_service_client::QuestionsServiceClient::connect(format!(
-        "http://{}",
-        state.questions_addr
-    ))
+    let mut client = questions::questions_service_client::QuestionsServiceClient::connect(
+        normalize_service_addr(&state.questions_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -764,10 +783,9 @@ async fn create_room_http(
     State(state): State<AppState>,
     Json(body): Json<CreateRoomBody>,
 ) -> ApiResult<RoomResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -790,10 +808,9 @@ async fn join_room_http(
     State(state): State<AppState>,
     Json(body): Json<JoinBody>,
 ) -> ApiResult<RoomResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -816,10 +833,9 @@ async fn start_game_http(
     Path(room_id): Path<String>,
     State(state): State<AppState>,
 ) -> ApiResult<RoomResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -839,10 +855,9 @@ async fn submit_answer_http(
     State(state): State<AppState>,
     Json(body): Json<SubmitAnswerBody>,
 ) -> ApiResult<SubmitAnswerResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -871,10 +886,9 @@ async fn leaderboard_http(
     State(state): State<AppState>,
     Query(query): Query<LeaderboardQuery>,
 ) -> ApiResult<LeaderboardResponseDto> {
-    let mut client = score::score_service_client::ScoreServiceClient::connect(format!(
-        "http://{}",
-        state.score_addr
-    ))
+    let mut client = score::score_service_client::ScoreServiceClient::connect(
+        normalize_service_addr(&state.score_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -900,10 +914,9 @@ async fn end_game_http(
     Path(room_id): Path<String>,
     State(state): State<AppState>,
 ) -> ApiResult<RoomResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
 
@@ -923,12 +936,12 @@ async fn room_state_http(
     State(state): State<AppState>,
     Query(query): Query<RoomStateQuery>,
 ) -> ApiResult<RoomStateResponseDto> {
-    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(format!(
-        "http://{}",
-        state.game_room_addr
-    ))
+    let mut client = gameroom::game_room_service_client::GameRoomServiceClient::connect(
+        normalize_service_addr(&state.game_room_addr),
+    )
     .await
     .map_err(map_connect_error)?;
+
     let response = client
         .get_room_state(gameroom::GetRoomStateRequest {
             room_id,
@@ -937,6 +950,7 @@ async fn room_state_http(
         .await
         .map_err(map_grpc_error)?
         .into_inner();
+
     Ok(Json(RoomStateResponseDto {
         room: response.room.map(RoomDto::from),
         players: response
@@ -964,12 +978,26 @@ async fn main() -> anyhow::Result<()> {
 
     let users_addr =
         env::var("USERS_SERVICE_ADDR").unwrap_or_else(|_| "users-service:50051".to_string());
+
     let questions_addr = env::var("QUESTIONS_SERVICE_ADDR")
         .unwrap_or_else(|_| "questions-service:50052".to_string());
+
     let game_room_addr = env::var("GAME_ROOM_SERVICE_ADDR")
         .unwrap_or_else(|_| "game-room-service:50053".to_string());
+
     let score_addr =
         env::var("SCORE_SERVICE_ADDR").unwrap_or_else(|_| "score-service:50054".to_string());
+
+    info!("users-service addr: {}", normalize_service_addr(&users_addr));
+    info!(
+        "questions-service addr: {}",
+        normalize_service_addr(&questions_addr)
+    );
+    info!(
+        "game-room-service addr: {}",
+        normalize_service_addr(&game_room_addr)
+    );
+    info!("score-service addr: {}", normalize_service_addr(&score_addr));
 
     let grpc_gateway = GatewayServerImpl {
         users_addr: users_addr.clone(),
@@ -985,8 +1013,11 @@ async fn main() -> anyhow::Result<()> {
         score_addr,
     };
 
-    let grpc_addr: SocketAddr = "0.0.0.0:50050".parse()?;
-    let http_addr: SocketAddr = "0.0.0.0:8080".parse()?;
+    let grpc_port = env::var("GRPC_PORT").unwrap_or_else(|_| "50050".to_string());
+    let http_port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+
+    let grpc_addr: SocketAddr = format!("0.0.0.0:{grpc_port}").parse()?;
+    let http_addr: SocketAddr = format!("0.0.0.0:{http_port}").parse()?;
 
     let app = Router::new()
         .route("/health", get(health))
