@@ -9,14 +9,7 @@ import { LoginPanel } from "./components/LoginPanel";
 import { PlayersPanel } from "./components/PlayersPanel";
 import { QuestionCard } from "./components/QuestionCard";
 
-import type {
-  Question,
-  Room,
-  RoomPlayer,
-  RoomState,
-  ScoreEntry,
-  User,
-} from "./types";
+import type { Question, Room, RoomState, ScoreEntry, User } from "./types";
 
 import "./styles.css";
 
@@ -50,6 +43,18 @@ export default function App() {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
   const hasRoom = Boolean(room?.id);
+
+  const isHost = Boolean(
+    user?.id && room?.createdBy && user.id === room.createdBy,
+  );
+
+  const isGameStarted = room?.status === "STARTED";
+
+  const resetRoundState = useCallback(() => {
+    setAnsweredQuestionIds(new Set());
+    setCurrentUserAnswered(false);
+    setSelectedOption(null);
+  }, []);
 
   const refreshLeaderboard = useCallback(async () => {
     if (!room?.id) return;
@@ -98,8 +103,8 @@ export default function App() {
 
     refreshLeaderboard();
 
-    const interval = setInterval(refreshLeaderboard, 2000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(refreshLeaderboard, 2000);
+    return () => window.clearInterval(interval);
   }, [room?.id, refreshLeaderboard]);
 
   useEffect(() => {
@@ -107,12 +112,46 @@ export default function App() {
 
     refreshRoomState();
 
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       refreshRoomState();
     }, 2000);
 
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [room?.id, question?.id, refreshRoomState]);
+
+  useEffect(() => {
+    if (!room?.id) return;
+    if (!isGameStarted) return;
+    if (isHost) return;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const response = await api.generateQuestion(room.id, false);
+
+        if (!response.question) return;
+
+        const incomingQuestion = response.question;
+
+        if (!question || incomingQuestion.id !== question.id) {
+          setQuestion(incomingQuestion);
+          resetRoundState();
+          await refreshRoomState(incomingQuestion.id);
+          toast.success("Nueva pregunta recibida");
+        }
+      } catch {
+        // Polling silencioso. Si el host todavía no generó pregunta, no molestamos.
+      }
+    }, 1500);
+
+    return () => window.clearInterval(interval);
+  }, [
+    room?.id,
+    isGameStarted,
+    isHost,
+    question?.id,
+    resetRoundState,
+    refreshRoomState,
+  ]);
 
   const handleUser = (newUser: User) => {
     setUser(newUser);
@@ -148,6 +187,11 @@ export default function App() {
   const handleStartGame = async () => {
     if (!room?.id) return;
 
+    if (!isHost) {
+      toast.error("Solo el host puede iniciar la partida");
+      return;
+    }
+
     try {
       setLoadingAction("start");
 
@@ -171,6 +215,11 @@ export default function App() {
   const handleGenerateQuestion = async () => {
     if (!room?.id) return;
 
+    if (!isHost) {
+      toast.error("Solo el host puede generar preguntas");
+      return;
+    }
+
     const canGenerate =
       !question || roomState?.allAnswered || currentUserAnswered;
 
@@ -182,16 +231,17 @@ export default function App() {
     try {
       setLoadingAction("question");
 
-      const response = await api.generateQuestion(room.id, Boolean(question));
+      const response = await api.generateQuestion(room.id, true);
+
+      if (!response.question) {
+        toast.error("No se pudo obtener una pregunta");
+        return;
+      }
 
       setQuestion(response.question);
-      setAnsweredQuestionIds(new Set());
-      setCurrentUserAnswered(false);
-      setSelectedOption(null);
+      resetRoundState();
 
-      if (response.question?.id) {
-        await refreshRoomState(response.question.id);
-      }
+      await refreshRoomState(response.question.id);
 
       toast.success(
         question ? "Siguiente pregunta lista" : "Pregunta generada",
@@ -209,6 +259,11 @@ export default function App() {
 
   const handleEndGame = async () => {
     if (!room?.id) return;
+
+    if (!isHost) {
+      toast.error("Solo el host puede finalizar la partida");
+      return;
+    }
 
     try {
       setLoadingAction("end");
@@ -312,8 +367,8 @@ export default function App() {
     roomState?.answeredCount ?? (currentUserAnswered ? 1 : 0);
   const allAnswered = roomState?.allAnswered ?? currentUserAnswered;
 
-  const canGenerateQuestion = Boolean(room?.id) && (!question || allAnswered);
-  const isHost = Boolean(user?.id && room?.createdBy && user.id === room.createdBy);
+  const canGenerateQuestion =
+    Boolean(room?.id) && isHost && (!question || allAnswered);
 
   const questionButtonLabel = !question
     ? "Generar pregunta"
@@ -322,7 +377,9 @@ export default function App() {
       : "Esperando jugadores...";
 
   const roundMessage = !question
-    ? "Genera una pregunta para comenzar la ronda."
+    ? isHost
+      ? "Genera una pregunta para comenzar la ronda."
+      : "Esperando a que el host genere la pregunta."
     : allAnswered
       ? isHost
         ? "Todos respondieron. Puedes generar la siguiente pregunta."
@@ -381,18 +438,26 @@ export default function App() {
           {hasRoom && (
             <>
               <section className="action-bar">
-                <button
-                  type="button"
-                  className="success-button"
-                  disabled={!!loadingAction || room?.status === "STARTED"}
-                  onClick={handleStartGame}
-                >
-                  {loadingAction === "start"
-                    ? "Iniciando..."
-                    : room?.status === "STARTED"
+                {isHost ? (
+                  <button
+                    type="button"
+                    className="success-button"
+                    disabled={!!loadingAction || room?.status === "STARTED"}
+                    onClick={handleStartGame}
+                  >
+                    {loadingAction === "start"
+                      ? "Iniciando..."
+                      : room?.status === "STARTED"
+                        ? "Partida iniciada"
+                        : "Iniciar partida"}
+                  </button>
+                ) : (
+                  <span className="arena-eyebrow">
+                    {room?.status === "STARTED"
                       ? "Partida iniciada"
-                      : "Iniciar partida"}
-                </button>
+                      : "Esperando a que el host inicie la partida"}
+                  </span>
+                )}
 
                 {isHost ? (
                   <button
@@ -407,22 +472,28 @@ export default function App() {
                   </button>
                 ) : (
                   <span className="arena-eyebrow">
-                    Esperando a que el host genere la siguiente pregunta
+                    Esperando pregunta del host
                   </span>
                 )}
 
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={!!loadingAction || room?.status === "FINISHED"}
-                  onClick={handleEndGame}
-                >
-                  {loadingAction === "end"
-                    ? "Finalizando..."
-                    : room?.status === "FINISHED"
-                      ? "Partida finalizada"
-                      : "Finalizar partida"}
-                </button>
+                {isHost ? (
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={!!loadingAction || room?.status === "FINISHED"}
+                    onClick={handleEndGame}
+                  >
+                    {loadingAction === "end"
+                      ? "Finalizando..."
+                      : room?.status === "FINISHED"
+                        ? "Partida finalizada"
+                        : "Finalizar partida"}
+                  </button>
+                ) : (
+                  <span className="arena-eyebrow">
+                    Solo el host puede finalizar
+                  </span>
+                )}
               </section>
 
               <section className="round-status">
@@ -453,7 +524,11 @@ export default function App() {
                 <div className="empty-state">
                   <span>🎌</span>
                   <h2>Sin pregunta activa</h2>
-                  <p>Genera una pregunta para comenzar la ronda.</p>
+                  <p>
+                    {isHost
+                      ? "Genera una pregunta para comenzar la ronda."
+                      : "Esperando a que el host genere la pregunta."}
+                  </p>
                 </div>
               )}
             </div>
