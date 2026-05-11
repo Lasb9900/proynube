@@ -182,7 +182,7 @@ export default function App() {
     try {
       setLoadingAction("question");
 
-      const response = await api.generateQuestion(room.id);
+      const response = await api.generateQuestion(room.id, Boolean(question));
 
       setQuestion(response.question);
       setAnsweredQuestionIds(new Set());
@@ -313,6 +313,7 @@ export default function App() {
   const allAnswered = roomState?.allAnswered ?? currentUserAnswered;
 
   const canGenerateQuestion = Boolean(room?.id) && (!question || allAnswered);
+  const isHost = Boolean(user?.id && room?.createdBy && user.id === room.createdBy);
 
   const questionButtonLabel = !question
     ? "Generar pregunta"
@@ -323,7 +324,9 @@ export default function App() {
   const roundMessage = !question
     ? "Genera una pregunta para comenzar la ronda."
     : allAnswered
-      ? "Todos respondieron. Puedes generar la siguiente pregunta."
+      ? isHost
+        ? "Todos respondieron. Puedes generar la siguiente pregunta."
+        : "Esperando a que el host genere la siguiente pregunta."
       : `Esperando respuestas... ${answeredCount}/${totalPlayers} jugadores respondieron.`;
 
   return (
@@ -391,16 +394,22 @@ export default function App() {
                       : "Iniciar partida"}
                 </button>
 
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={!!loadingAction || !canGenerateQuestion}
-                  onClick={handleGenerateQuestion}
-                >
-                  {loadingAction === "question"
-                    ? "Generando..."
-                    : questionButtonLabel}
-                </button>
+                {isHost ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!!loadingAction || !canGenerateQuestion}
+                    onClick={handleGenerateQuestion}
+                  >
+                    {loadingAction === "question"
+                      ? "Generando..."
+                      : questionButtonLabel}
+                  </button>
+                ) : (
+                  <span className="arena-eyebrow">
+                    Esperando a que el host genere la siguiente pregunta
+                  </span>
+                )}
 
                 <button
                   type="button"

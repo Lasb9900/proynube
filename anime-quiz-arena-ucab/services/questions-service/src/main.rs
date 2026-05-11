@@ -762,8 +762,9 @@ impl QuestionsService for QuestionsSvc {
         } else {
             req.room_id
         };
+        let force_new = req.force_new;
 
-        info!(room_id = %room_id, "GenerateQuestion request received");
+        info!(room_id = %room_id, force_new, "GenerateQuestion request received");
 
         if let Some(existing_question) = self.get_existing_question_for_room(&room_id).await {
             info!(room_id = %room_id, question_id = %existing_question.id, "returning existing question for room");

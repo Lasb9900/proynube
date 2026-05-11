@@ -55,7 +55,7 @@ message GatewayQuestion {
   int32 anime_id = 8;
 }
 
-message GatewayGenerateQuestionRequest { string room_id = 1; }
+message GatewayGenerateQuestionRequest { string room_id = 1; bool force_new = 2; }
 message GatewayGenerateQuestionResponse { GatewayQuestion question = 1; }
 
 message GatewayRoom {
