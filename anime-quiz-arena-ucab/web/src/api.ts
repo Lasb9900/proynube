@@ -55,10 +55,10 @@ export const login = (email: string, password: string) =>
     body: JSON.stringify({ email, password }),
   });
 
-export async function generateQuestion(roomId: string) {
+export async function generateQuestion(roomId: string, forceNew = false) {
   const data = await req("/api/questions/generate", {
     method: "POST",
-    body: JSON.stringify({ room_id: roomId }),
+    body: JSON.stringify({ room_id: roomId, force_new: forceNew }),
   });
 
   return {

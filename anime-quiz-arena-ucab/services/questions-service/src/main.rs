@@ -24,6 +24,7 @@ use questions::{
 struct QuestionsSvc {
     adapter: Arc<JikanAdapter>,
     recent_curated_by_room: Arc<Mutex<HashMap<String, VecDeque<usize>>>>,
+    current_question_by_room: Arc<Mutex<HashMap<String, Question>>>,
 }
 
 #[derive(Debug)]
@@ -761,9 +762,41 @@ impl QuestionsService for QuestionsSvc {
         } else {
             req.room_id
         };
+        let force_new = req.force_new;
 
-        info!(room_id = %room_id, "GenerateQuestion request received");
+        info!(room_id = %room_id, force_new, "GenerateQuestion request received");
 
+        if !force_new {
+            if let Some(existing_question) = self.get_existing_question_for_room(&room_id).await {
+                info!(room_id = %room_id, force_new, question_id = %existing_question.id, "returning existing question for room");
+                return Ok(Response::new(GenerateQuestionResponse {
+                    question: Some(existing_question),
+                }));
+            }
+        }
+
+        let question = self.generate_new_question_for_room(&room_id).await?;
+        self.store_question_for_room(&room_id, &question).await;
+        info!(room_id = %room_id, force_new, question_id = %question.id, "generated new question for room");
+
+        Ok(Response::new(GenerateQuestionResponse {
+            question: Some(question),
+        }))
+    }
+}
+
+impl QuestionsSvc {
+    async fn get_existing_question_for_room(&self, room_id: &str) -> Option<Question> {
+        let questions_by_room = self.current_question_by_room.lock().await;
+        questions_by_room.get(room_id).cloned()
+    }
+
+    async fn store_question_for_room(&self, room_id: &str, question: &Question) {
+        let mut questions_by_room = self.current_question_by_room.lock().await;
+        questions_by_room.insert(room_id.to_string(), question.clone());
+    }
+
+    async fn generate_new_question_for_room(&self, room_id: &str) -> Result<Question, Status> {
         let use_curated = rand::thread_rng().gen_bool(0.75);
 
         if use_curated {
@@ -771,9 +804,7 @@ impl QuestionsService for QuestionsSvc {
                 generate_curated_question(&room_id, &self.recent_curated_by_room).await
             {
                 info!(index, "GenerateQuestion using curated pool index={index}");
-                return Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(question),
-                }));
+                return Ok(question);
             }
             warn!("Curated pool unavailable; falling back to dynamic template");
         }
@@ -788,26 +819,24 @@ impl QuestionsService for QuestionsSvc {
                     .ok_or_else(|| Status::internal("No anime available for question"))?;
 
                 let question = build_varied_question(options).unwrap_or_else(|| {
-    let correct_index = options
-        .iter()
-        .position(|anime| anime.id == correct.id)
-        .unwrap_or(0);
+                    let correct_index = options
+                        .iter()
+                        .position(|anime| anime.id == correct.id)
+                        .unwrap_or(0);
 
-    Question {
-        id: Uuid::new_v4().to_string(),
-        text: "Cual de estos titulos corresponde a un anime real?".to_string(),
-        option_a: options[0].title.clone(),
-        option_b: options[1].title.clone(),
-        option_c: options[2].title.clone(),
-        option_d: options[3].title.clone(),
-        correct_option: ANSWER_LABELS[correct_index].to_string(),
-        anime_id: correct.id,
-    }
-});
+                    Question {
+                        id: Uuid::new_v4().to_string(),
+                        text: "Cual de estos titulos corresponde a un anime real?".to_string(),
+                        option_a: options[0].title.clone(),
+                        option_b: options[1].title.clone(),
+                        option_c: options[2].title.clone(),
+                        option_d: options[3].title.clone(),
+                        correct_option: ANSWER_LABELS[correct_index].to_string(),
+                        anime_id: correct.id,
+                    }
+                });
 
-                Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(question),
-                }))
+                Ok(question)
             }
             Ok(_) => {
                 warn!("Top anime response returned less than 4 elements; using curated fallback");
@@ -815,9 +844,7 @@ impl QuestionsService for QuestionsSvc {
                     .await
                     .map(|(question, _)| question)
                     .unwrap_or_else(fallback_question);
-                Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(question),
-                }))
+                Ok(question)
             }
             Err(e) => {
                 warn!(error = %e, "Dynamic generation failed; using curated fallback");
@@ -825,9 +852,7 @@ impl QuestionsService for QuestionsSvc {
                     .await
                     .map(|(question, _)| question)
                     .unwrap_or_else(fallback_question);
-                Ok(Response::new(GenerateQuestionResponse {
-                    question: Some(question),
-                }))
+                Ok(question)
             }
         }
     }
@@ -1014,15 +1039,15 @@ fn build_varied_question(options: &[Anime]) -> Option<Question> {
             })
         }
         _ => Some(Question {
-    id: Uuid::new_v4().to_string(),
-    text: "Cual de estos titulos corresponde a un anime real?".to_string(),
-    option_a: options[0].title.clone(),
-    option_b: options[1].title.clone(),
-    option_c: options[2].title.clone(),
-    option_d: options[3].title.clone(),
-    correct_option: "A".to_string(),
-    anime_id: options[0].id,
-}),
+            id: Uuid::new_v4().to_string(),
+            text: "Cual de estos titulos corresponde a un anime real?".to_string(),
+            option_a: options[0].title.clone(),
+            option_b: options[1].title.clone(),
+            option_c: options[2].title.clone(),
+            option_d: options[3].title.clone(),
+            correct_option: "A".to_string(),
+            anime_id: options[0].id,
+        }),
     }
 }
 
@@ -1052,6 +1077,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let svc = QuestionsSvc {
         adapter: Arc::new(adapter),
         recent_curated_by_room: Arc::new(Mutex::new(HashMap::new())),
+        current_question_by_room: Arc::new(Mutex::new(HashMap::new())),
     };
 
     info!(%addr, %jikan_base_url, http_timeout_secs, breaker_cooldown_secs, "Starting questions-service");

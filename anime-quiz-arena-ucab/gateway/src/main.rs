@@ -176,6 +176,7 @@ struct LoginBody {
 #[derive(Debug, Deserialize)]
 struct RoomIdBody {
     room_id: String,
+    force_new: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,9 +358,9 @@ impl GatewayServerImpl {
     async fn questions_client(
         &self,
     ) -> Result<questions::questions_service_client::QuestionsServiceClient<Channel>, Status> {
-        questions::questions_service_client::QuestionsServiceClient::connect(normalize_service_addr(
-            &self.questions_addr,
-        ))
+        questions::questions_service_client::QuestionsServiceClient::connect(
+            normalize_service_addr(&self.questions_addr),
+        )
         .await
         .map_err(|_| Status::unavailable("questions-service no disponible"))
     }
@@ -478,7 +479,10 @@ impl GatewayService for GatewayServerImpl {
         let mut c = self.questions_client().await?;
 
         let r = c
-            .generate_question(questions::GenerateQuestionRequest { room_id: p.room_id })
+            .generate_question(questions::GenerateQuestionRequest {
+                room_id: p.room_id,
+                force_new: p.force_new,
+            })
             .await
             .map_err(|e| Status::new(e.code(), e.message().to_string()))?
             .into_inner();
@@ -748,6 +752,7 @@ async fn generate_question_http(
     let response = client
         .generate_question(questions::GenerateQuestionRequest {
             room_id: body.room_id,
+            force_new: body.force_new.unwrap_or(false),
         })
         .await
         .map_err(map_grpc_error)?
@@ -988,7 +993,10 @@ async fn main() -> anyhow::Result<()> {
     let score_addr =
         env::var("SCORE_SERVICE_ADDR").unwrap_or_else(|_| "score-service:50054".to_string());
 
-    info!("users-service addr: {}", normalize_service_addr(&users_addr));
+    info!(
+        "users-service addr: {}",
+        normalize_service_addr(&users_addr)
+    );
     info!(
         "questions-service addr: {}",
         normalize_service_addr(&questions_addr)
@@ -997,7 +1005,10 @@ async fn main() -> anyhow::Result<()> {
         "game-room-service addr: {}",
         normalize_service_addr(&game_room_addr)
     );
-    info!("score-service addr: {}", normalize_service_addr(&score_addr));
+    info!(
+        "score-service addr: {}",
+        normalize_service_addr(&score_addr)
+    );
 
     let grpc_gateway = GatewayServerImpl {
         users_addr: users_addr.clone(),
